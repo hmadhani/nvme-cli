@@ -16,6 +16,7 @@ SYNOPSIS
 		[--hostnqn=<hostnqn>      | -q <hostnqn>]
 		[--hostid=<hostid>        | -I <hostid>]
 		[--raw=<filename>	  | -r <filename>]
+		[--device=<device>        | -d <device>]
 		[--keep-alive-tmo=<sec>   | -k <sec>]
 		[--reconnect-delay=<#>	  | -c <#>]
 		[--ctrl-loss-tmo=<#>	  | -l <#>]
@@ -27,6 +28,7 @@ SYNOPSIS
 		[--queue-size=<#>         | -Q <#>]
 		[--persistent             | -p]
 		[--quiet                  | -S]
+		[--output-format=<fmt>    | -o <fmt>]
 
 DESCRIPTION
 -----------
@@ -78,6 +80,7 @@ OPTIONS
 |Value|Definition
 |rdma|The network fabric is an rdma network (RoCE, iWARP, Infiniband, basic rdma, etc)
 |fc  |*WIP* The network fabric is a Fibre Channel network.
+|tcp |The network fabric is a TCP/IP network.
 |loop|Connect to a NVMe over Fabrics target on the local host
 |=================
 
@@ -115,6 +118,11 @@ OPTIONS
 	This field will take the output of the 'nvme discover' command
 	and dump it to a raw binary file. By default 'nvme discover' will
 	dump the output to stdout.
+
+-d <device>::
+--device=<device>::
+	This field takes a device as input. Device is in the format of nvme*,
+	eg. nvme0, nvme1
 
 -k <#>::
 --keep-alive-tmo=<#>::
@@ -167,6 +175,11 @@ OPTIONS
 -S::
 --quiet::
 	Suppress already connected errors.
+
+-o <format>::
+--output-format=<format>::
+              Set the reporting format to 'normal', 'json', or
+              'binary'. Only one output format can be used at a time.
 
 EXAMPLES
 --------

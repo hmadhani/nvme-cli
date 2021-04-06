@@ -36,7 +36,6 @@
 #include "plugin.h"
 #include "argconfig.h"
 #include "suffix.h"
-#include "json.h"
 
 #define CREATE_CMD
 
@@ -132,7 +131,7 @@ static char *log_pages_supp_print(__u32 pageID)
 static void json_log_pages_supp(log_page_map *logPageMap)
 {
 	struct json_object *root;
-	struct json_array *logPages;
+	struct json_object *logPages;
 	__u32 i = 0;
 
 	root = json_create_object();
@@ -177,7 +176,8 @@ static int log_pages_supp(int argc, char **argv, struct command *cmd,
 	};
 
 	fd = parse_and_open(argc, argv, desc, opts);
-	err = nvme_get_log(fd, 1, 0xc5, false, sizeof(logPageMap), &logPageMap);
+	err = nvme_get_log(fd, 1, 0xc5, false, NVME_NO_LOG_LSP,
+		sizeof(logPageMap), &logPageMap);
 	if (!err) {
 		if (strcmp(cfg.output_format,"json")) {
 			printf ("Seagate Supported Log-pages count :%d\n",
@@ -312,7 +312,7 @@ static char *print_ext_smart_id(__u8 attrId)
 		return "RAIS_ECC_CORRECT_ERR_COUNT";
 		break;
 	case VS_ATTR_ID_UNCORRECTABLE_RAISE_ERRORS:
-		return "Uncorrectable read error count";/*VS_ATTR_ID_UNCORRECTABLE_RAISE_ERRORS*/
+		return "Uncorrectable RAISE error count";/*VS_ATTR_ID_UNCORRECTABLE_RAISE_ERRORS*/
 		break;
 	case VS_ATTR_ID_DRIVE_LIFE_PROTECTION_STATUS:
 		return "DRIVE_LIFE_PROTECTION_STATUS";
@@ -493,7 +493,7 @@ static void json_print_smart_log(struct json_object *root,
 				 EXTENDED_SMART_INFO_T *ExtdSMARTInfo )
 {
 	/*struct json_object *root; */
-	struct json_array *lbafs;
+	struct json_object *lbafs;
 	int index = 0;
 
 	static __u64 lsbGbErased = 0, msbGbErased = 0, lsbLifWrtToFlash = 0, msbLifWrtToFlash = 0,
@@ -650,7 +650,7 @@ static void json_print_smart_log_CF(struct json_object *root,
 				    vendor_log_page_CF *pLogPageCF)
 {
 	/*struct json_object *root;*/
-	struct json_array *logPages;
+	struct json_object *logPages;
 	unsigned int currentTemp, maxTemp;
 	char buf[40];
 
@@ -715,11 +715,9 @@ static int vs_smart_log(int argc, char **argv, struct command *cmd, struct plugi
 	EXTENDED_SMART_INFO_T   ExtdSMARTInfo;
 	vendor_log_page_CF      logPageCF;
 	int fd;
-	struct json_object *root;
-	struct json_array *lbafs;
+	struct json_object *root = json_create_object();
+	struct json_object *lbafs = json_create_array();
 	struct json_object *lbafs_ExtSmart, *lbafs_DramSmart;
-	root = json_create_object();
-	lbafs = json_create_array();
 
 	const char *desc = "Retrieve Seagate Extended SMART information for the given device ";
 	const char *output_format = "output in binary format";
@@ -741,7 +739,8 @@ static int vs_smart_log(int argc, char **argv, struct command *cmd, struct plugi
 	if (strcmp(cfg.output_format,"json"))
 		printf("Seagate Extended SMART Information :\n");
 
-	err = nvme_get_log(fd, 1, 0xC4, false, sizeof(ExtdSMARTInfo), &ExtdSMARTInfo);
+	err = nvme_get_log(fd, 1, 0xC4, false, NVME_NO_LOG_LSP,
+		sizeof(ExtdSMARTInfo), &ExtdSMARTInfo);
 	if (!err) {
 		if (strcmp(cfg.output_format,"json")) {
 			printf("%-39s %-15s %-19s \n", "Description", "Ext-Smart-Id", "Ext-Smart-Value");
@@ -763,7 +762,8 @@ static int vs_smart_log(int argc, char **argv, struct command *cmd, struct plugi
 		 * Next get Log Page 0xCF
 		 */
 
-		err = nvme_get_log(fd, 1, 0xCF, false, sizeof(logPageCF), &logPageCF);
+		err = nvme_get_log(fd, 1, 0xCF, false, NVME_NO_LOG_LSP,
+			sizeof(logPageCF), &logPageCF);
 		if (!err) {
 			if(strcmp(cfg.output_format,"json")) {
 				/*printf("Seagate DRAM Supercap SMART Attributes :\n");*/
@@ -860,7 +860,8 @@ static int temp_stats(int argc, char **argv, struct command *cmd, struct plugin 
 	}
 
 	/* STEP-2 : Get Max temperature form Ext SMART-id 194 */
-	err = nvme_get_log(fd, 1, 0xC4, false, sizeof(ExtdSMARTInfo), &ExtdSMARTInfo);
+	err = nvme_get_log(fd, 1, 0xC4, false, NVME_NO_LOG_LSP,
+		sizeof(ExtdSMARTInfo), &ExtdSMARTInfo);
 	if (!err) {
 		for(index = 0; index < NUMBER_EXTENDED_SMART_ATTRIBUTES; index++) {
 			if (ExtdSMARTInfo.vendorData[index].AttributeNumber == VS_ATTR_ID_MAX_LIFE_TEMPERATURE) {
@@ -882,7 +883,8 @@ static int temp_stats(int argc, char **argv, struct command *cmd, struct plugin 
 		fprintf(stderr, "NVMe Status:%s(%x)\n",
 			nvme_status_to_string(err), err);
 
-	cf_err = nvme_get_log(fd, 1, 0xCF, false, sizeof(ExtdSMARTInfo), &logPageCF);
+	cf_err = nvme_get_log(fd, 1, 0xCF, false, NVME_NO_LOG_LSP,
+		sizeof(ExtdSMARTInfo), &logPageCF);
 
 	if(!cf_err) {
 		scCurrentTemp = logPageCF.AttrCF.SuperCapCurrentTemperature;
@@ -1011,7 +1013,8 @@ static int vs_pcie_error_log(int argc, char **argv, struct command *cmd, struct 
 	if(strcmp(cfg.output_format,"json"))
 		printf("Seagate PCIe error counters Information :\n");
 
-	err = nvme_get_log(fd, 1, 0xCB, false, sizeof(pcieErrorLog), &pcieErrorLog);
+	err = nvme_get_log(fd, 1, 0xCB, false, NVME_NO_LOG_LSP,
+		sizeof(pcieErrorLog), &pcieErrorLog);
 	if (!err) {
 		if(strcmp(cfg.output_format,"json")) {
 			print_vs_pcie_error_log(pcieErrorLog);

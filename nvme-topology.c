@@ -9,8 +9,14 @@
 #include "nvme.h"
 #include "nvme-ioctl.h"
 
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-id128.h>
+#define NVME_HOSTNQN_ID SD_ID128_MAKE(c7,f4,61,81,12,be,49,32,8c,83,10,6f,9d,dd,d8,6b)
+#endif
+
 static const char *dev = "/dev/";
 static const char *subsys_dir = "/sys/class/nvme-subsystem/";
+static void free_ctrl(struct nvme_ctrl *c);
 
 char *get_nvme_subsnqn(char *path)
 {
@@ -45,7 +51,7 @@ close_fd:
 	return subsysnqn;
 }
 
-char *nvme_get_ctrl_attr(char *path, const char *attr)
+char *nvme_get_ctrl_attr(const char *path, const char *attr)
 {
 	char *attrpath, *value;
 	ssize_t ret;
@@ -144,7 +150,7 @@ static int scan_namespace(struct nvme_namespace *n)
 	int ret, fd;
 	char *path;
 
-	ret = asprintf(&path, "%s%s", dev, n->name);
+	ret = asprintf(&path, "%s%s", n->ctrl->path, n->name);
 	if (ret < 0)
 		return ret;
 
@@ -152,9 +158,11 @@ static int scan_namespace(struct nvme_namespace *n)
 	if (fd < 0)
 		goto free;
 
-	n->nsid = nvme_get_nsid(fd);
-	if (n->nsid < 0)
-		goto close_fd;
+	if (!n->nsid) {
+		n->nsid = nvme_get_nsid(fd);
+		if (n->nsid < 0)
+			goto close_fd;
+	}
 
 	ret = nvme_identify_ns(fd, n->nsid, 0, &n->ns);
 	if (ret < 0)
@@ -228,6 +236,19 @@ static char *get_nvme_ctrl_path_ana_state(char *path, int nsid)
 	return ana_state;
 }
 
+static bool ns_attached_to_ctrl(int nsid, struct nvme_ctrl *ctrl)
+{
+	struct nvme_namespace *n;
+	int i;
+
+	for (i = 0; i < ctrl->nr_namespaces; i++) {
+		n = &ctrl->namespaces[i];
+		if (nsid == n->nsid)
+			return true;
+	}
+	return false;
+}
+
 static int scan_ctrl(struct nvme_ctrl *c, char *p, __u32 ns_instance)
 {
 	struct nvme_namespace *n;
@@ -248,7 +269,7 @@ static int scan_ctrl(struct nvme_ctrl *c, char *p, __u32 ns_instance)
 	if (ns_instance)
 		c->ana_state = get_nvme_ctrl_path_ana_state(path, ns_instance);
 
-	ret = scandir(path, &ns, scan_namespace_filter, alphasort);
+	ret = scandir(path, &ns, scan_ctrl_namespace_filter, alphasort);
 	if (ret == -1) {
 		fprintf(stderr, "Failed to open %s: %s\n", path, strerror(errno));
 		return errno;
@@ -256,11 +277,36 @@ static int scan_ctrl(struct nvme_ctrl *c, char *p, __u32 ns_instance)
 
 	c->nr_namespaces = ret;
 	c->namespaces = calloc(c->nr_namespaces, sizeof(*n));
-	for (i = 0; i < c->nr_namespaces; i++) {
-		n = &c->namespaces[i];
-		n->name = strdup(ns[i]->d_name);
-		n->ctrl = c;
-		scan_namespace(n);
+	if (c->namespaces) {
+		for (i = 0; i < c->nr_namespaces; i++) {
+			char *ns_path, nsid[16];
+			int ns_fd;
+
+			n = &c->namespaces[i];
+			n->name = strdup(ns[i]->d_name);
+			n->ctrl = c;
+			ret = asprintf(&ns_path, "%s/%s/nsid", path, n->name);
+			if (ret < 0)
+				continue;
+			ns_fd = open(ns_path, O_RDONLY);
+			if (ns_fd < 0) {
+				free(ns_path);
+				continue;
+			}
+			ret = read(ns_fd, nsid, 16);
+			if (ret < 0) {
+				close(ns_fd);
+				free(ns_path);
+				continue;
+			}
+			n->nsid = (unsigned)strtol(nsid, NULL, 10);
+			scan_namespace(n);
+			close(ns_fd);
+			free(ns_path);
+		}
+	} else {
+		i = c->nr_namespaces;
+		c->nr_namespaces = 0;
 	}
 
 	while (i--)
@@ -268,7 +314,7 @@ static int scan_ctrl(struct nvme_ctrl *c, char *p, __u32 ns_instance)
 	free(ns);
 	free(path);
 
-	ret = asprintf(&path, "%s%s", dev, c->name);
+	ret = asprintf(&path, "%s%s", c->path, c->name);
 	if (ret < 0)
 		return ret;
 
@@ -288,12 +334,12 @@ free:
 	return 0;
 }
 
-static int scan_subsystem(struct nvme_subsystem *s, __u32 ns_instance)
+static int scan_subsystem(struct nvme_subsystem *s, __u32 ns_instance, int nsid)
 {
 	struct dirent **ctrls, **ns;
 	struct nvme_namespace *n;
 	struct nvme_ctrl *c;
-	int i, ret;
+	int i, j = 0, ret;
 	char *path;
 
 	ret = asprintf(&path, "%s%s", subsys_dir, s->name);
@@ -309,11 +355,18 @@ static int scan_subsystem(struct nvme_subsystem *s, __u32 ns_instance)
 	s->nr_ctrls = ret;
 	s->ctrls = calloc(s->nr_ctrls, sizeof(*c));
 	for (i = 0; i < s->nr_ctrls; i++) {
-		c = &s->ctrls[i];
+		c = &s->ctrls[j];
 		c->name = strdup(ctrls[i]->d_name);
+		c->path = strdup(dev);
 		c->subsys = s;
 		scan_ctrl(c, path, ns_instance);
+
+		if (!ns_instance || ns_attached_to_ctrl(nsid, c))
+			j++;
+		else
+			free_ctrl(c);
 	}
+	s->nr_ctrls = j;
 
 	while (i--)
 		free(ctrls[i]);
@@ -327,11 +380,16 @@ static int scan_subsystem(struct nvme_subsystem *s, __u32 ns_instance)
 
 	s->nr_namespaces = ret;
 	s->namespaces = calloc(s->nr_namespaces, sizeof(*n));
-	for (i = 0; i < s->nr_namespaces; i++) {
-		n = &s->namespaces[i];
-		n->name = strdup(ns[i]->d_name);
-		n->ctrl = &s->ctrls[0];
-		scan_namespace(n);
+	if (s->namespaces) {
+		for (i = 0; i < s->nr_namespaces; i++) {
+			n = &s->namespaces[i];
+			n->name = strdup(ns[i]->d_name);
+			n->ctrl = &s->ctrls[0];
+			scan_namespace(n);
+		}
+	} else {
+		i = s->nr_namespaces;
+		s->nr_namespaces = 0;
 	}
 
 	while (i--)
@@ -349,7 +407,7 @@ static int verify_legacy_ns(struct nvme_namespace *n)
 	char *path;
 	int ret, fd;
 
-	ret = asprintf(&path, "%s%s", dev, n->name);
+	ret = asprintf(&path, "%s%s", n->ctrl->path, n->name);
 	if (ret < 0)
 		return ret;
 
@@ -388,7 +446,7 @@ static int verify_legacy_ns(struct nvme_namespace *n)
  * is the controller to nvme0n1 for such older kernels. We will also assume
  * every controller is its own subsystem.
  */
-static int legacy_list(struct nvme_topology *t)
+static int legacy_list(struct nvme_topology *t, char *dev_dir)
 {
 	struct nvme_ctrl *c;
 	struct nvme_subsystem *s;
@@ -397,10 +455,10 @@ static int legacy_list(struct nvme_topology *t)
 	int ret = 0, fd, i;
 	char *path;
 
-	t->nr_subsystems = scandir(dev, &devices, scan_ctrls_filter, alphasort);
-	if (t->nr_subsystems < 0) {
-		fprintf(stderr, "no NVMe device(s) detected.\n");
-		return t->nr_subsystems;
+	t->nr_subsystems = scandir(dev_dir, &devices, scan_ctrls_filter, alphasort);
+	if (t->nr_subsystems == -1) {
+		fprintf(stderr, "Failed to open %s: %s\n", dev_dir, strerror(errno));
+		return errno;
 	}
 
 	t->subsystems = calloc(t->nr_subsystems, sizeof(*s));
@@ -417,11 +475,18 @@ static int legacy_list(struct nvme_topology *t)
 		c = s->ctrls;
 		c->name = strdup(s->name);
 		sscanf(c->name, "nvme%d", &current_index);
-		c->nr_namespaces = scandir(dev, &namespaces, scan_dev_filter,
+		c->path = strdup(dev_dir);
+		c->nr_namespaces = scandir(c->path, &namespaces, scan_dev_filter,
 					   alphasort);
 		c->namespaces = calloc(c->nr_namespaces, sizeof(*n));
+		if (!c->namespaces) {
+			while (c->nr_namespaces--)
+				free(namespaces[c->nr_namespaces]);
+			free(namespaces);
+			continue;
+		}
 
-		ret = asprintf(&path, "%s%s", dev, c->name);
+		ret = asprintf(&path, "%s%s", c->path, c->name);
 		if (ret < 0)
 			continue;
 		ret = 0;
@@ -463,6 +528,7 @@ static void free_ctrl(struct nvme_ctrl *c)
 		free(n->name);
 	}
 	free(c->name);
+	free(c->path);
 	free(c->transport);
 	free(c->address);
 	free(c->state);
@@ -488,35 +554,64 @@ static void free_subsystem(struct nvme_subsystem *s)
 	free(s->namespaces);
 }
 
+static int scan_subsystem_dir(struct nvme_topology *t, char *dev_dir)
+{
+	struct nvme_topology dev_dir_t = { };
+	int ret, i, total_nr_subsystems;
+
+	ret = legacy_list(&dev_dir_t, dev_dir);
+	if (ret != 0)
+		return ret;
+
+	total_nr_subsystems = t->nr_subsystems + dev_dir_t.nr_subsystems;
+	t->subsystems = realloc(t->subsystems,
+				total_nr_subsystems * sizeof(struct nvme_subsystem));
+	for (i = 0; i < dev_dir_t.nr_subsystems; i++){
+		t->subsystems[i+t->nr_subsystems] = dev_dir_t.subsystems[i];
+	}
+	t->nr_subsystems = total_nr_subsystems;
+
+	return 0;
+}
+
 int scan_subsystems(struct nvme_topology *t, const char *subsysnqn,
-		    __u32 ns_instance)
+		    __u32 ns_instance, int nsid, char *dev_dir)
 {
 	struct nvme_subsystem *s;
 	struct dirent **subsys;
-	int i, j = 0;
+	int ret = 0, i, j = 0;
 
 	t->nr_subsystems = scandir(subsys_dir, &subsys, scan_subsys_filter,
 				   alphasort);
-	if (t->nr_subsystems < 0)
-		return legacy_list(t);
+	if (t->nr_subsystems < 0) {
+		ret = legacy_list(t, (char *)dev);
+		if (ret != 0)
+			return ret;
+	} else {
 
-	t->subsystems = calloc(t->nr_subsystems, sizeof(*s));
-	for (i = 0; i < t->nr_subsystems; i++) {
-		s = &t->subsystems[j];
-		s->name = strdup(subsys[i]->d_name);
-		scan_subsystem(s, ns_instance);
+		t->subsystems = calloc(t->nr_subsystems, sizeof(*s));
+		for (i = 0; i < t->nr_subsystems; i++) {
+			s = &t->subsystems[j];
+			s->name = strdup(subsys[i]->d_name);
+			scan_subsystem(s, ns_instance, nsid);
 
-		if (!subsysnqn || !strcmp(s->subsysnqn, subsysnqn))
-			j++;
-		else
-			free_subsystem(s);
+			if (!subsysnqn || !strcmp(s->subsysnqn, subsysnqn))
+				j++;
+			else
+				free_subsystem(s);
+		}
+		t->nr_subsystems = j;
+
+		while (i--)
+			free(subsys[i]);
+		free(subsys);
 	}
-	t->nr_subsystems = j;
 
-	while (i--)
-		free(subsys[i]);
-	free(subsys);
-	return 0;
+	if (dev_dir != NULL && strcmp(dev_dir, "/dev/")) {
+		ret = scan_subsystem_dir(t, dev_dir);
+	}
+
+	return ret;
 }
 
 void free_topology(struct nvme_topology *t)
@@ -606,3 +701,75 @@ void *mmap_registers(const char *dev)
 	return membase;
 }
 
+#define PATH_DMI_ENTRIES	"/sys/firmware/dmi/entries"
+
+int uuid_from_dmi(char *system_uuid)
+{
+	int f;
+	DIR *d;
+	struct dirent *de;
+	char buf[512];
+
+	system_uuid[0] = '\0';
+	d = opendir(PATH_DMI_ENTRIES);
+	if (!d)
+		return -ENXIO;
+	while ((de = readdir(d))) {
+		char filename[PATH_MAX];
+		int len, type;
+
+		if (de->d_name[0] == '.')
+			continue;
+		sprintf(filename, "%s/%s/type", PATH_DMI_ENTRIES, de->d_name);
+		f = open(filename, O_RDONLY);
+		if (f < 0)
+			continue;
+		len = read(f, buf, 512);
+		close(f);
+		if (len < 0)
+			continue;
+		if (sscanf(buf, "%d", &type) != 1)
+			continue;
+		if (type != 1)
+			continue;
+		sprintf(filename, "%s/%s/raw", PATH_DMI_ENTRIES, de->d_name);
+		f = open(filename, O_RDONLY);
+		if (f < 0)
+			continue;
+		len = read(f, buf, 512);
+		close(f);
+		if (len < 0)
+			continue;
+		/* Sigh. https://en.wikipedia.org/wiki/Overengineering */
+		/* DMTF SMBIOS 3.0 Section 7.2.1 System UUID */
+		sprintf(system_uuid,
+			"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+			"%02x%02x%02x%02x%02x%02x",
+			(uint8_t)buf[8 + 3], (uint8_t)buf[8 + 2],
+			(uint8_t)buf[8 + 1], (uint8_t)buf[8 + 0],
+			(uint8_t)buf[8 + 5], (uint8_t)buf[8 + 4],
+			(uint8_t)buf[8 + 7], (uint8_t)buf[8 + 6],
+			(uint8_t)buf[8 + 8], (uint8_t)buf[8 + 9],
+			(uint8_t)buf[8 + 10], (uint8_t)buf[8 + 11],
+			(uint8_t)buf[8 + 12], (uint8_t)buf[8 + 13],
+			(uint8_t)buf[8 + 14], (uint8_t)buf[8 + 15]);
+		break;
+	}
+	closedir(d);
+	return strlen(system_uuid) ? 0 : -ENXIO;
+}
+
+int uuid_from_systemd(char *systemd_uuid)
+{
+#ifdef HAVE_SYSTEMD
+	sd_id128_t id;
+
+	if (sd_id128_get_machine_app_specific(NVME_HOSTNQN_ID, &id) < 0)
+		return -ENXIO;
+
+	sprintf(systemd_uuid, SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(id));
+	return 0;
+#else
+	return -ENOTSUP;
+#endif
+}

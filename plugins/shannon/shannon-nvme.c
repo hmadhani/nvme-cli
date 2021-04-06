@@ -11,7 +11,6 @@
 #include "nvme.h"
 #include "nvme-print.h"
 #include "nvme-ioctl.h"
-#include "json.h"
 #include "plugin.h"
 
 #include "argconfig.h"
@@ -143,7 +142,7 @@ static int get_additional_smart_log(int argc, char **argv, struct command *cmd, 
 
 	fd = parse_and_open(argc, argv, desc, opts);
 	err = nvme_get_log(fd, cfg.namespace_id, 0xca, false,
-		   sizeof(smart_log), &smart_log);
+		   NVME_NO_LOG_LSP, sizeof(smart_log), &smart_log);
 	if (!err) {
 		if (!cfg.raw_binary)
 			show_shannon_smart_log(&smart_log, cfg.namespace_id, devicename);
@@ -182,7 +181,7 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 
 	struct config {
 		__u32 namespace_id;
-		__u32 feature_id;
+		enum nvme_feat feature_id;
 		__u8  sel;
 		__u32 cdw11;
 		__u32 data_len;
@@ -192,7 +191,7 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 
 	struct config cfg = {
 		.namespace_id = 1,
-		.feature_id   = 0,
+		.feature_id   = NVME_FEAT_NONE,
 		.sel          = 0,
 		.cdw11        = 0,
 		.data_len     = 0,
