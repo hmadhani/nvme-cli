@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #undef CMD_INC_FILE
 #define CMD_INC_FILE plugins/dera/dera-nvme
 
@@ -6,7 +7,7 @@
 
 #include "cmd.h"
 
-PLUGIN(NAME("dera", "Dera vendor specific extensions"),
+PLUGIN(NAME("dera", "Dera vendor specific extensions", NVME_VERSION),
 	COMMAND_LIST(
 		ENTRY("smart-log-add", "Retrieve Dera SMART Log, show it", get_status, "stat")
 	)

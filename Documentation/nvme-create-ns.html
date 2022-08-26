@@ -4,7 +4,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
 <head>
 <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=UTF-8" />
-<meta name="generator" content="AsciiDoc 8.6.10" />
+<meta name="generator" content="AsciiDoc 10.2.0" />
 <title>nvme-create-ns(1)</title>
 <style type="text/css">
 /* Shared CSS for AsciiDoc xhtml11 and html5 backends */
@@ -436,7 +436,7 @@ thead, p.table.header {
 p.table {
   margin-top: 0;
 }
-/* Because the table frame attribute is overriden by CSS in most browsers. */
+/* Because the table frame attribute is overridden by CSS in most browsers. */
 div.tableblock > table[frame="void"] {
   border-style: none;
 }
@@ -757,6 +757,7 @@ nvme-create-ns(1) Manual Page
                         [--anagrp-id=&lt;anagrpid&gt; | -a &lt;anagrpid&gt;]
                         [--nvmset-id=&lt;nvmsetid&gt; | -i &lt;nvmsetid&gt;]
                         [--csi=&lt;command_set_identifier&gt; | -y &lt;command_set_identifier&gt;]
+                        [--lbstm=&lt;lbstm&gt; | -l &lt;lbstm&gt;]
                         [--block-size=&lt;block-size&gt; | -b &lt;block-size&gt;]
                         [--timeout=&lt;timeout&gt; | -t &lt;timeout&gt;]
 DESCRIPTION</pre>
@@ -838,7 +839,7 @@ OPTIONS</code></pre>
 </dt>
 <dd>
 <p>
-        ANA Gorup Identifier. If this value is 0h specifies
+        ANA Group Identifier. If this value is 0h specifies
         that the controller determines the value to use
 </p>
 </dd>
@@ -863,6 +864,17 @@ OPTIONS</code></pre>
 <p>
         This field specifies the identifier of command set.
         if not issued, NVM Command Set will be selected.
+</p>
+</dd>
+<dt class="hdlist1">
+-l &lt;lbstm&gt;
+</dt>
+<dt class="hdlist1">
+--lbstm=&lt;lbstm&gt;
+</dt>
+<dd>
+<p>
+        Logical Block Storage Tag Mask for end-to-end protection.
 </p>
 </dd>
 <dt class="hdlist1">
@@ -898,7 +910,7 @@ OPTIONS</code></pre>
 <div id="footer">
 <div id="footer-text">
 Last updated
- 2020-05-06 10:35:44 CEST
+ 2022-08-01 14:48:50 CEST
 </div>
 </div>
 </body>

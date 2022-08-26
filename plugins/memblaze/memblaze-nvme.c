@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
@@ -5,15 +6,11 @@
 #include <unistd.h>
 #include <time.h>
 
-#include "linux/nvme_ioctl.h"
-
 #include "nvme.h"
-#include "nvme-print.h"
-#include "nvme-ioctl.h"
+#include "libnvme.h"
 #include "plugin.h"
-
-#include "argconfig.h"
-#include "suffix.h"
+#include "linux/types.h"
+#include "nvme-print.h"
 
 #define CREATE_CMD
 #include "memblaze-nvme.h"
@@ -79,22 +76,19 @@ static int compare_fw_version(const char *fw1, const char *fw2)
 
 #define STR_VER_SIZE            (5)
 
-int getlogpage_format_type(char *fw_ver)
+int getlogpage_format_type(char *model_name)
 {
-    char fw_ver_local[STR_VER_SIZE];
-    strncpy(fw_ver_local, fw_ver, STR_VER_SIZE);
-    *(fw_ver_local + STR_VER_SIZE - 1) = '\0';
-    if ( IS_RAISIN(fw_ver_local)
-        || IS_KUMQUAT(fw_ver_local)
-        || IS_LOQUAT(fw_ver_local)
-        )
+    int logpage_format_type = INTEL_FORMAT;
+    const char *boundary_model_name1 = "P"; // MEMBLAZE P7936DT0640M00
+    const char *boundary_model_name2 = "P5920"; // Use INTEL_FORMAT from Raisin P5920.
+    if (0 == strncmp(model_name, boundary_model_name1, strlen(boundary_model_name1)))
     {
-        return INTEL_FORMAT;
+        if (strncmp(model_name, boundary_model_name2, strlen(boundary_model_name2)) < 0)
+        {
+            logpage_format_type = MEMBLAZE_FORMAT;
+        }
     }
-    else
-    {
-        return MEMBLAZE_FORMAT;
-    }
+    return logpage_format_type;
 }
 
 static __u32 item_id_2_u32(struct nvme_memblaze_smart_log_item *item)
@@ -168,6 +162,15 @@ static void show_memblaze_smart_log_new(struct nvme_memblaze_smart_log *s,
     u8 *nm = malloc(NM_SIZE * sizeof(u8));
     u8 *raw = malloc(RAW_SIZE * sizeof(u8));
 
+    if (!nm) {
+        if (raw)
+            free(raw);
+        return;
+    }
+    if (!raw) {
+        free(nm);
+        return;
+    }
     /* Table Title */
     printf("%s:%s %s:%x\n", STRN2_01, devname, STRN2_02, nsid);
     /* Clumn Name*/
@@ -232,8 +235,6 @@ static void show_memblaze_smart_log_new(struct nvme_memblaze_smart_log *s,
     printf("%-32s: %3d%%       %s%u%s%u%s%u\n", STR17_01,  *nm, STR17_03, *raw,
         STR17_04, *(raw+2), STR17_05, *(raw+4));
     /* 18 RAISIN_SI_VD_POWER_LOSS_PROTECTION */
-    get_memblaze_new_smart_info(smart, RAISIN_SI_VD_POWER_LOSS_PROTECTION, nm, raw);
-    printf("%-32s: %3d%%       %"PRIu64"\n", STR18_01, *nm, int48_to_long(raw));
     /* 19 RAISIN_SI_VD_READ_FAIL */
     get_memblaze_new_smart_info(smart, RAISIN_SI_VD_READ_FAIL, nm, raw);
     printf("%-32s: %3d%%       %"PRIu64"\n", STR19_01, *nm, int48_to_long(raw));
@@ -251,11 +252,11 @@ static void show_memblaze_smart_log_new(struct nvme_memblaze_smart_log *s,
 static void show_memblaze_smart_log_old(struct nvme_memblaze_smart_log *smart,
     unsigned int nsid, const char *devname, const char *fw_ver)
 {
-    char fw_ver_local[STR_VER_SIZE];
+    char fw_ver_local[STR_VER_SIZE + 1];
     struct nvme_memblaze_smart_log_item *item;
 
     strncpy(fw_ver_local, fw_ver, STR_VER_SIZE);
-    *(fw_ver_local + STR_VER_SIZE - 1) = '\0';
+    *(fw_ver_local + STR_VER_SIZE) = '\0';
 
     printf("Additional Smart Log for NVME device:%s namespace-id:%x\n", devname, nsid);
 
@@ -351,6 +352,15 @@ static void show_memblaze_smart_log_old(struct nvme_memblaze_smart_log *smart,
         u8 *nm = malloc(NM_SIZE * sizeof(u8));
         u8 *raw = malloc(RAW_SIZE * sizeof(u8));
 
+	if (!nm) {
+            if (raw)
+                free(raw);
+            return;
+	}
+	if (!raw) {
+            free(nm);
+            return;
+	}
         /* 00 RAISIN_SI_VD_PROGRAM_FAIL */
         get_memblaze_new_smart_info(s, PROGRAM_FAIL, nm, raw);
         printf("%-32s                                : %3d%%       %"PRIu64"\n",
@@ -392,7 +402,7 @@ static int show_memblaze_smart_log(int fd, __u32 nsid, const char *devname,
         ctrl.fr[0], ctrl.fr[1], ctrl.fr[2], ctrl.fr[3],
         ctrl.fr[4], ctrl.fr[5], ctrl.fr[6]);
 
-    if (getlogpage_format_type(fw_ver)) // Intel Format & new format
+    if (getlogpage_format_type(ctrl.mn)) // Intel Format & new format
     {
         show_memblaze_smart_log_new(smart, nsid, devname);
     }
@@ -416,11 +426,13 @@ int parse_params(char *str, int number, ...)
         c = strtok(str, ",");
         if ( c == NULL) {
             printf("No enough parameters. abort...\n");
-            exit(EINVAL);
+            va_end(argp);
+            return 1;
         }
 
-        if (isalnum(*c) == 0) {
+        if (isalnum((int)*c) == 0) {
             printf("%s is not a valid number\n", c);
+            va_end(argp);
             return 1;
         }
         value = atoi(c);
@@ -441,15 +453,16 @@ int parse_params(char *str, int number, ...)
 static int mb_get_additional_smart_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
 	struct nvme_memblaze_smart_log smart_log;
-	int err, fd;
 	char *desc = "Get Memblaze vendor specific additional smart log (optionally, "\
 		      "for the specified namespace), and show it.";
 	const char *namespace = "(optional) desired namespace";
 	const char *raw = "dump output in binary format";
+	struct nvme_dev *dev;
 	struct config {
 		__u32 namespace_id;
-		int   raw_binary;
+		bool  raw_binary;
 	};
+	int err;
 
 	struct config cfg = {
 		.namespace_id = NVME_NSID_ALL,
@@ -461,21 +474,24 @@ static int mb_get_additional_smart_log(int argc, char **argv, struct command *cm
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
 
-	err = nvme_get_log(fd, cfg.namespace_id, 0xca, false,
-			   NVME_NO_LOG_LSP, sizeof(smart_log), &smart_log);
+	err = nvme_get_nsid_log(dev_fd(dev), false, 0xca, cfg.namespace_id,
+				sizeof(smart_log), &smart_log);
 	if (!err) {
 		if (!cfg.raw_binary)
-			err = show_memblaze_smart_log(fd, cfg.namespace_id, devicename, &smart_log);
+			err = show_memblaze_smart_log(dev_fd(dev),
+						      cfg.namespace_id,
+						      dev->name, &smart_log);
 		else
 			d_raw((unsigned char *)&smart_log, sizeof(smart_log));
 	}
 	if (err > 0)
-		fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+		nvme_show_status(err);
 
+	dev_close(dev);
 	return err;
 }
 
@@ -492,18 +508,33 @@ static char *mb_feature_to_string(int feature)
 static int mb_get_powermanager_status(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
     const char *desc = "Get Memblaze power management ststus\n	(value 0 - 25w, 1 - 20w, 2 - 15w)";
-    int err, fd;
     __u32 result;
     __u32 feature_id = MB_FEAT_POWER_MGMT;
+    struct nvme_dev *dev;
+    int err;
 
     OPT_ARGS(opts) = {
         OPT_END()
     };
 
-    fd = parse_and_open(argc, argv, desc, opts);
-    if (fd < 0) return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+	    return err;
 
-    err = nvme_get_feature(fd, 0, feature_id, 0, 0, 0, NULL, &result);
+    struct nvme_get_features_args args = {
+	    .args_size		= sizeof(args),
+	    .fd			= dev_fd(dev),
+	    .fid		= feature_id,
+	    .nsid		= 0,
+	    .sel		= 0,
+	    .cdw11		= 0,
+	    .uuidx		= 0,
+	    .data_len		= 0,
+	    .data		= NULL,
+	    .timeout		= NVME_DEFAULT_IOCTL_TIMEOUT,
+	    .result		= &result,
+    };
+    err = nvme_get_features(&args);
     if (err < 0) {
         perror("get-feature");
     }
@@ -512,7 +543,8 @@ static int mb_get_powermanager_status(int argc, char **argv, struct command *cmd
             mb_feature_to_string(feature_id),
             nvme_select_to_string(0), result);
     } else if (err > 0)
-    fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+	    nvme_show_status(err);
+    dev_close(dev);
     return err;
 }
 
@@ -521,13 +553,14 @@ static int mb_set_powermanager_status(int argc, char **argv, struct command *cmd
     const char *desc = "Set Memblaze power management status\n	(value 0 - 25w, 1 - 20w, 2 - 15w)";
     const char *value = "new value of feature (required)";
     const char *save = "specifies that the controller shall save the attribute";
-    int err, fd;
+    struct nvme_dev *dev;
     __u32 result;
+    int err;
 
     struct config {
         __u32 feature_id;
         __u32 value;
-        int   save;
+        bool  save;
     };
 
     struct config cfg = {
@@ -542,10 +575,26 @@ static int mb_set_powermanager_status(int argc, char **argv, struct command *cmd
         OPT_END()
     };
 
-    fd = parse_and_open(argc, argv, desc, opts);
-    if (fd < 0) return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+	    return err;
 
-    err = nvme_set_feature(fd, 0, cfg.feature_id, cfg.value, 0, cfg.save, 0, NULL, &result);
+    struct nvme_set_features_args args = {
+	    .args_size		= sizeof(args),
+	    .fd			= dev_fd(dev),
+	    .fid		= cfg.feature_id,
+	    .nsid		= 0,
+	    .cdw11		= cfg.value,
+	    .cdw12		= 0,
+	    .save		= cfg.save,
+	    .uuidx		= 0,
+	    .cdw15		= 0,
+	    .data_len		= 0,
+	    .data		= NULL,
+	    .timeout		= NVME_DEFAULT_IOCTL_TIMEOUT,
+	    .result		= &result,
+    };
+    err = nvme_set_features(&args);
     if (err < 0) {
         perror("set-feature");
     }
@@ -553,8 +602,9 @@ static int mb_set_powermanager_status(int argc, char **argv, struct command *cmd
         printf("set-feature:%02x (%s), value:%#08x\n", cfg.feature_id,
             mb_feature_to_string(cfg.feature_id), cfg.value);
     } else if (err > 0)
-        fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+	nvme_show_status(err);
 
+    dev_close(dev);
     return err;
 }
 
@@ -568,9 +618,10 @@ static int mb_set_high_latency_log(int argc, char **argv, struct command *cmd, s
                        "	p1 value: 0 is disable, 1 is enable\n"\
                        "	p2 value: 1 .. 5000 ms";
     const char *param = "input parameters";
-    int err, fd;
-    __u32 result;
     int param1 = 0, param2 = 0;
+    struct nvme_dev *dev;
+    __u32 result;
+    int err;
 
     struct config {
         __u32 feature_id;
@@ -589,20 +640,38 @@ static int mb_set_high_latency_log(int argc, char **argv, struct command *cmd, s
         OPT_END()
     };
 
-    fd = parse_and_open(argc, argv, desc, opts);
-    if (fd < 0) return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+	    return err;
 
     if (parse_params(cfg.param, 2, &param1, &param2)) {
         printf("setfeature: invalid formats %s\n", cfg.param);
-        exit(EINVAL);
+        dev_close(dev);
+        return EINVAL;
     }
     if ((param1 == 1) && (param2 < P2MIN || param2 > P2MAX)) {
         printf("setfeature: invalid high io latency threshold %d\n", param2);
-        exit(EINVAL);
+        dev_close(dev);
+        return EINVAL;
     }
     cfg.value = (param1 << MB_FEAT_HIGH_LATENCY_VALUE_SHIFT) | param2;
 
-    err = nvme_set_feature(fd, 0, cfg.feature_id, cfg.value, 0, 0, 0, NULL, &result);
+    struct nvme_set_features_args args = {
+	    .args_size		= sizeof(args),
+	    .fd			= dev_fd(dev),
+	    .fid		= cfg.feature_id,
+	    .nsid		= 0,
+	    .cdw11		= cfg.value,
+	    .cdw12		= 0,
+	    .save		= false,
+	    .uuidx		= 0,
+	    .cdw15		= 0,
+	    .data_len		= 0,
+	    .data		= NULL,
+	    .timeout		= NVME_DEFAULT_IOCTL_TIMEOUT,
+	    .result		= &result,
+    };
+    err = nvme_set_features(&args);
     if (err < 0) {
         perror("set-feature");
     }
@@ -610,8 +679,9 @@ static int mb_set_high_latency_log(int argc, char **argv, struct command *cmd, s
         printf("set-feature:0x%02X (%s), value:%#08x\n", cfg.feature_id,
             mb_feature_to_string(cfg.feature_id), cfg.value);
     } else if (err > 0)
-        fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+	nvme_show_status(err);
 
+    dev_close(dev);
     return err;
 }
 
@@ -692,9 +762,14 @@ static int glp_high_latency(FILE *fdi, char *buf, int buflen, int print)
                      1900 + t->tm_year, 1 + t->tm_mon, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, millisec);
         }
 
-        fprintf(fdi, "%-32s %-7x %-6x %-6x %-8x %4x%08x  %-8x %-d\n",
-                string, logEntry->opcode, logEntry->sqe, logEntry->cid, logEntry->nsid,
-                (__u32)(logEntry->sLBA >> 32), (__u32)logEntry->sLBA, logEntry->numLBA, logEntry->latency);
+	if (fdi) {
+		fprintf(fdi, "%-32s %-7x %-6x %-6x %-8x %4x%08x  %-8x %-d\n",
+			string, logEntry->opcode, logEntry->sqe,
+			logEntry->cid, logEntry->nsid,
+			(__u32)(logEntry->sLBA >> 32),
+			(__u32)logEntry->sLBA, logEntry->numLBA,
+			logEntry->latency);
+	}
         if (print)
         {
             printf("%-32s %-7x %-6x %-6x %-8x %4x%08x  %-8x %-d\n",
@@ -708,44 +783,50 @@ static int glp_high_latency(FILE *fdi, char *buf, int buflen, int print)
 static int mb_high_latency_log_print(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
     const char *desc = "Get Memblaze high latency log";
-    int err, fd;
     char buf[LOG_PAGE_SIZE];
+    struct nvme_dev *dev;
     FILE *fdi = NULL;
+    int err;
 
-    fdi = fopen(FID_C3_LOG_FILENAME, "w+");
     OPT_ARGS(opts) = {
         OPT_END()
     };
 
-    fd = parse_and_open(argc, argv, desc, opts);
-    if (fd < 0) return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+	    return err;
+
+    fdi = fopen(FID_C3_LOG_FILENAME, "w+");
 
     glp_high_latency_show_bar(fdi, DO_PRINT_FLAG);
-    err = nvme_get_log(fd, NVME_NSID_ALL, GLP_ID_VU_GET_HIGH_LATENCY_LOG, 0, NVME_NO_LOG_LSP, sizeof(buf), &buf);
+    err = nvme_get_log_simple(dev_fd(dev), GLP_ID_VU_GET_HIGH_LATENCY_LOG,
+			      sizeof(buf), &buf);
 
-    while ( 1) {
+    while (1) {
         if (!glp_high_latency(fdi, buf, LOG_PAGE_SIZE, DO_PRINT_FLAG)) break;
-        err = nvme_get_log(fd, NVME_NSID_ALL, GLP_ID_VU_GET_HIGH_LATENCY_LOG, 0, NVME_NO_LOG_LSP, sizeof(buf), &buf);
+        err = nvme_get_log_simple(dev_fd(dev), GLP_ID_VU_GET_HIGH_LATENCY_LOG,
+				  sizeof(buf), &buf);
         if ( err) {
-            fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+	    nvme_show_status(err);
             break;
         }
     }
 
     if (NULL != fdi) fclose(fdi);
+    dev_close(dev);
     return err;
 }
 
 
 static int memblaze_fw_commit(int fd, int select)
 {
-	struct nvme_admin_cmd cmd = {
-		.opcode		= nvme_admin_activate_fw,
+	struct nvme_passthru_cmd cmd = {
+		.opcode		= nvme_admin_fw_commit,
 		.cdw10		= 8,
 		.cdw12      = select,
 	};
 
-	return nvme_submit_admin_passthru(fd, &cmd);
+	return nvme_submit_admin_passthru(fd, &cmd, NULL);
 }
 
 static int mb_selective_download(int argc, char **argv, struct command *cmd, struct plugin *plugin)
@@ -761,7 +842,8 @@ static int mb_selective_download(int argc, char **argv, struct command *cmd, str
 	const char *select = "FW Select (e.g., --select=OOB, EEP, ALL)";
 	int xfer = 4096;
 	void *fw_buf;
-	int fd, selectNo,fw_fd,fw_size,err,offset = 0;
+	int selectNo,fw_fd,fw_size,err,offset = 0;
+	struct nvme_dev *dev;
 	struct stat sb;
 	int i;
 
@@ -781,9 +863,9 @@ static int mb_selective_download(int argc, char **argv, struct command *cmd, str
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
 
 	if (strlen(cfg.select) != 3) {
 		fprintf(stderr, "Invalid select flag\n");
@@ -818,49 +900,65 @@ static int mb_selective_download(int argc, char **argv, struct command *cmd, str
 	if (err < 0) {
 		perror("fstat");
 		err = errno;
+		goto out_close;
 	}
 
 	fw_size = sb.st_size;
 	if (fw_size & 0x3) {
 		fprintf(stderr, "Invalid size:%d for f/w image\n", fw_size);
 		err = EINVAL;
-		goto out;
+		goto out_close;
 	}
 
 	if (posix_memalign(&fw_buf, getpagesize(), fw_size)) {
 		fprintf(stderr, "No memory for f/w size:%d\n", fw_size);
 		err = ENOMEM;
-		goto out;
+		goto out_close;
 	}
 
-	if (read(fw_fd, fw_buf, fw_size) != ((ssize_t)(fw_size)))
-		return EIO;
+	if (read(fw_fd, fw_buf, fw_size) != ((ssize_t)(fw_size))) {
+		err = errno;
+		goto out_free;
+	}
 
 	while (fw_size > 0) {
 		xfer = min(xfer, fw_size);
 
-		err = nvme_fw_download(fd, offset, xfer, fw_buf);
+		struct nvme_fw_download_args args = {
+			.args_size	= sizeof(args),
+			.fd		= dev_fd(dev),
+			.offset		= offset,
+			.data_len	= xfer,
+			.data		= fw_buf,
+			.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+			.result		= NULL,
+		};
+		err = nvme_fw_download(&args);
 		if (err < 0) {
 			perror("fw-download");
-			goto out;
+			goto out_free;
 		} else if (err != 0) {
-			fprintf(stderr, "NVME Admin command error:%s(%x)\n",
-					nvme_status_to_string(err), err);
-			goto out;
+			nvme_show_status(err);
+			goto out_free;
 		}
 		fw_buf     += xfer;
 		fw_size    -= xfer;
 		offset += xfer;
 	}
 
-	err = memblaze_fw_commit(fd,selectNo);
+	err = memblaze_fw_commit(dev_fd(dev), selectNo);
 
 	if(err == 0x10B || err == 0x20B) {
 		err = 0;
 		fprintf(stderr, "Update successful! Please power cycle for changes to take effect\n");
 	}
 
+out_free:
+	free(fw_buf);
+out_close:
+	close(fw_fd);
 out:
+	dev_close(dev);
 	return err;
 }
 
@@ -870,22 +968,17 @@ static void ioLatencyHistogramOutput(FILE *fd, int index, int start, int end, ch
     int len;
     char string[64], subString0[12], subString1[12];
 
-    len = snprintf(subString0, sizeof(subString0), "%d%s", start, unit0);
+    snprintf(subString0, sizeof(subString0), "%d%s", start, unit0);
     if (end != 0x7FFFFFFF)
-    {
-        len = snprintf(subString1, sizeof(subString1), "%d%s", end, unit1);
-    }
+        snprintf(subString1, sizeof(subString1), "%d%s", end, unit1);
     else
-    {
-        len = snprintf(subString1, sizeof(subString1), "%s", "+INF");
-    }
-    len = snprintf(string, sizeof(string), "%-11d %-11s %-11s %-11u\n", index, subString0, subString1,
+        snprintf(subString1, sizeof(subString1), "%s", "+INF");
+    len = snprintf(string, sizeof(string), "%-11d %-11s %-11s %-11u\n",
+		   index, subString0, subString1,
                    pHistogram[index]);
     fwrite(string, 1, len, fd);
     if (print)
-    {
         printf("%s", string);
-    }
 }
 
 int io_latency_histogram(char *file, char *buf, int print, int logid)
@@ -964,23 +1057,24 @@ int io_latency_histogram(char *file, char *buf, int print, int logid)
         fPRINT_PARAM1("Unsupported io latency histogram revision\n");
     }
 
-    fclose(fdi);
+    if (fdi)
+	    fclose(fdi);
     return 1;
 }
 
 static int mb_lat_stats_log_print(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
     char stats[LOG_PAGE_SIZE];
-    int err = 0;
-    int fd;
     char f1[] = FID_C1_LOG_FILENAME;
     char f2[] = FID_C2_LOG_FILENAME;
+    struct nvme_dev *dev;
+    int err;
 
     const char *desc = "Get Latency Statistics log and show it.";
     const char *write = "Get write statistics (read default)";
 
     struct config {
-        int  write;
+        bool  write;
     };
     struct config cfg = {
         .write = 0,
@@ -991,17 +1085,19 @@ static int mb_lat_stats_log_print(int argc, char **argv, struct command *cmd, st
         OPT_END()
     };
 
-    fd = parse_and_open(argc, argv, desc, opts);
-    if (fd < 0) return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+	    return err;
 
-    err = nvme_get_log(fd, NVME_NSID_ALL, cfg.write ? 0xc2 : 0xc1, false, NVME_NO_LOG_LSP, sizeof(stats), &stats);
+    err = nvme_get_log_simple(dev_fd(dev), cfg.write ? 0xc2 : 0xc1,
+			      sizeof(stats), &stats);
     if (!err)
         io_latency_histogram(cfg.write ? f2 : f1, stats, DO_PRINT_FLAG,
          cfg.write ? GLP_ID_VU_GET_WRITE_LATENCY_HISTOGRAM : GLP_ID_VU_GET_READ_LATENCY_HISTOGRAM);
     else
-        fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+	nvme_show_status(err);
 
-    close(fd);
+    dev_close(dev);
     return err;
 }
 
@@ -1009,8 +1105,9 @@ static int mb_lat_stats_log_print(int argc, char **argv, struct command *cmd, st
 #define FID        0x68
 static int memblaze_clear_error_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
-	int err, fd;
-	char *desc = "Clear Memblaze devices error log.";
+    char *desc = "Clear Memblaze devices error log.";
+    struct nvme_dev *dev;
+    int err;
 
     //const char *value = "new value of feature (required)";
     //const char *save = "specifies that the controller shall save the attribute";
@@ -1028,24 +1125,38 @@ static int memblaze_clear_error_log(int argc, char **argv, struct command *cmd, 
         .save         = 0,
     };
 
-	OPT_ARGS(opts) = {
-		OPT_END()
-	};
+    OPT_ARGS(opts) = {
+        OPT_END()
+    };
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+    err = parse_and_open(&dev, argc, argv, desc, opts);
+    if (err)
+        return err;
 
-
-
-    err = nvme_set_feature(fd, 0, cfg.feature_id, cfg.value, 0, cfg.save, 0, NULL, &result);
+    struct nvme_set_features_args args = {
+        .args_size      = sizeof(args),
+        .fd             = dev_fd(dev),
+        .fid            = cfg.feature_id,
+        .nsid           = 0,
+        .cdw11          = cfg.value,
+        .cdw12          = 0,
+        .save           = cfg.save,
+        .uuidx          = 0,
+        .cdw15          = 0,
+        .data_len       = 0,
+        .data           = NULL,
+        .timeout        = NVME_DEFAULT_IOCTL_TIMEOUT,
+        .result         = &result,
+    };
+    err = nvme_set_features(&args);
     if (err < 0) {
         perror("set-feature");
     }
     if (!err) {
         printf("set-feature:%02x (%s), value:%#08x\n", cfg.feature_id, mb_feature_to_string(cfg.feature_id), cfg.value);
     } else if (err > 0)
-        fprintf(stderr, "NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
+        nvme_show_status(err);
+
 /*
 	struct nvme_admin_cmd admin_cmd = {
 		.opcode		= OP,
@@ -1060,13 +1171,13 @@ static int memblaze_clear_error_log(int argc, char **argv, struct command *cmd, 
 		printf("NVMe Status:%s(%x)\n", nvme_status_to_string(err), err);
 	};
 */
-	return err;
+    dev_close(dev);
+    return err;
 }
 
 static int mb_set_lat_stats(int argc, char **argv,
 		struct command *command, struct plugin *plugin)
 {
-	int err, fd;
 	const char *desc = (
 			"Enable/Disable Latency Statistics Tracking.\n"
 			"No argument prints current status.");
@@ -1079,8 +1190,10 @@ static int mb_set_lat_stats(int argc, char **argv,
 	const __u32 cdw12 = 0x0;
 	const __u32 data_len = 32;
 	const __u32 save = 0;
-	__u32 result;
+	struct nvme_dev *dev;
 	void *buf = NULL;
+	__u32 result;
+	int err;
 
 	struct config {
 		bool enable, disable;
@@ -1092,12 +1205,12 @@ static int mb_set_lat_stats(int argc, char **argv,
 	};
 
 	const struct argconfig_commandline_options command_line_options[] = {
-		{"enable", 'e', "", CFG_NONE, &cfg.enable, no_argument, enable_desc},
-		{"disable", 'd', "", CFG_NONE, &cfg.disable, no_argument, disable_desc},
+		{"enable", 'e', "", CFG_FLAG, &cfg.enable, no_argument, enable_desc},
+		{"disable", 'd', "", CFG_FLAG, &cfg.disable, no_argument, disable_desc},
 		{NULL}
 	};
 
-	fd = parse_and_open(argc, argv, desc, command_line_options);
+	err = parse_and_open(&dev, argc, argv, desc, command_line_options);
 
 	enum Option {
 		None = -1,
@@ -1111,40 +1224,69 @@ static int mb_set_lat_stats(int argc, char **argv,
 	else if (cfg.enable || cfg.disable)
 		option = cfg.enable;
 
-	if (fd < 0)
-		return fd;
+	struct nvme_get_features_args args_get = {
+		.args_size	= sizeof(args_get),
+		.fd		= dev_fd(dev),
+		.fid		= fid,
+		.nsid		= nsid,
+		.sel		= sel,
+		.cdw11		= cdw11,
+		.uuidx		= 0,
+		.data_len	= data_len,
+		.data		= buf,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= &result,
+	};
+
+	struct nvme_set_features_args args_set = {
+		.args_size	= sizeof(args_set),
+		.fd		= dev_fd(dev),
+		.fid		= fid,
+		.nsid		= nsid,
+		.cdw11		= option,
+		.cdw12		= cdw12,
+		.save		= save,
+		.uuidx		= 0,
+		.cdw15		= 0,
+		.data_len	= data_len,
+		.data		= buf,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= &result,
+	};
+
+	if (err)
+		return err;
 	switch (option) {
 	case None:
-		err = nvme_get_feature(fd, nsid, fid, sel, cdw11, data_len, buf,
-					&result);
+		err = nvme_get_features(&args_get);
 		if (!err) {
 			printf(
 				"Latency Statistics Tracking (FID 0x%X) is currently (%i).\n",
 				fid, result);
 		} else {
 			printf("Could not read feature id 0xE2.\n");
+			dev_close(dev);
 			return err;
 		}
 		break;
 	case True:
 	case False:
-		err = nvme_set_feature(fd, nsid, fid, option, cdw12, save,
-				data_len, buf, &result);
+	        err = nvme_set_features(&args_set);
 		if (err > 0) {
-			fprintf(stderr, "NVMe Status:%s(%x)\n",
-					nvme_status_to_string(err), err);
+			nvme_show_status(err);
 		} else if (err < 0) {
 			perror("Enable latency tracking");
 			fprintf(stderr, "Command failed while parsing.\n");
 		} else {
 			printf("Successfully set enable bit for FID (0x%X) to %i.\n",
-				fid, option);
+				0xe2, option);
 		}
 		break;
 	default:
 		printf("%d not supported.\n", option);
-		return EINVAL;
+		err = EINVAL;
 	}
-	return fd;
+	dev_close(dev);
+	return err;
 }
 

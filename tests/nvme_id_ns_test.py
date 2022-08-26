@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
 # Copyright (c) 2015-2016 Western Digital Corporation or its affiliates.
 #
 # This program is free software; you can redistribute it and/or
@@ -26,7 +28,7 @@ NVme Identify Namespace Testcase:-
 """
 
 import subprocess
-from nose.tools import assert_equal
+
 from nvme_test import TestNVMe
 
 
@@ -36,19 +38,19 @@ class TestNVMeIdentifyNamespace(TestNVMe):
     Represents Identify Namesepace testcase
     """
 
-    def __init__(self):
+    def setUp(self):
         """ Pre Section for TestNVMeIdentifyNamespace. """
-        TestNVMe.__init__(self)
+        super().setUp()
         self.setup_log_dir(self.__class__.__name__)
         self.ns_list = self.get_ns_list()
 
-    def __del__(self):
+    def tearDown(self):
         """
         Post Section for TestNVMeIdentifyNamespace
 
             - Call super class's destructor.
         """
-        TestNVMe.__del__(self)
+        super().tearDown()
 
     def get_id_ns(self, nsid):
         """
@@ -78,11 +80,11 @@ class TestNVMeIdentifyNamespace(TestNVMe):
                 - 0 on success, error code on failure.
         """
         err = 0
-        for namespace  in self.ns_list:
+        for namespace in self.ns_list:
             err = self.get_id_ns(str(namespace))
         return err
 
     def test_id_ns(self):
         """ Testcase main """
-        assert_equal(self.get_id_ns(1), 0)
-        assert_equal(self.get_id_ns_all(), 0)
+        self.assertEqual(self.get_id_ns(1), 0)
+        self.assertEqual(self.get_id_ns_all(), 0)

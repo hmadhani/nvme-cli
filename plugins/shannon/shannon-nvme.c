@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
@@ -5,16 +6,12 @@
 #include <unistd.h>
 #include <inttypes.h>
 
-#include "linux/nvme_ioctl.h"
-
 #include "common.h"
 #include "nvme.h"
-#include "nvme-print.h"
-#include "nvme-ioctl.h"
+#include "libnvme.h"
 #include "plugin.h"
-
-#include "argconfig.h"
-#include "suffix.h"
+#include "linux/types.h"
+#include "nvme-print.h"
 
 #define CREATE_CMD
 #include "shannon-nvme.h"
@@ -120,15 +117,16 @@ static void show_shannon_smart_log(struct nvme_shannon_smart_log *smart,
 static int get_additional_smart_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
 	struct nvme_shannon_smart_log smart_log;
-	int err, fd;
 	char *desc = "Get Shannon vendor specific additional smart log (optionally, "\
 		      "for the specified namespace), and show it.";
 	const char *namespace = "(optional) desired namespace";
 	const char *raw = "dump output in binary format";
+	struct nvme_dev *dev;
 	struct config {
 		__u32 namespace_id;
-		int   raw_binary;
+		bool  raw_binary;
 	};
+	int err;
 
 	struct config cfg = {
 		.namespace_id = NVME_NSID_ALL,
@@ -140,18 +138,21 @@ static int get_additional_smart_log(int argc, char **argv, struct command *cmd, 
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	err = nvme_get_log(fd, cfg.namespace_id, 0xca, false,
-		   NVME_NO_LOG_LSP, sizeof(smart_log), &smart_log);
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
+	err = nvme_get_nsid_log(dev_fd(dev), false, 0xca, cfg.namespace_id,
+				sizeof(smart_log), &smart_log);
 	if (!err) {
 		if (!cfg.raw_binary)
-			show_shannon_smart_log(&smart_log, cfg.namespace_id, devicename);
+			show_shannon_smart_log(&smart_log, cfg.namespace_id,
+					       dev->name);
 		else
 			d_raw((unsigned char *)&smart_log, sizeof(smart_log));
 	}
 	else if (err > 0)
-		fprintf(stderr, "NVMe Status:%s(%x)\n",
-					nvme_status_to_string(err), err);
+		nvme_show_status(err);
+	dev_close(dev);
 	return err;
 }
 
@@ -161,7 +162,7 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 		"specified controller. Operating parameters are grouped "\
 		"and identified by Feature Identifiers; each Feature "\
 		"Identifier contains one or more attributes that may affect "\
-		"behaviour of the feature. Each Feature has three possible "\
+		"behavior of the feature. Each Feature has three possible "\
 		"settings: default, saveable, and current. If a Feature is "\
 		"saveable, it may be modified by set-feature. Default values "\
 		"are vendor-specific and not changeable. Use set-feature to "\
@@ -175,23 +176,24 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 	const char *data_len = "buffer len (if) data is returned";
 	const char *cdw11 = "dword 11 for interrupt vector config";
 	const char *human_readable = "show infos in readable format";
-	int err, fd;
-	__u32 result;
+	struct nvme_dev *dev;
 	void *buf = NULL;
+	__u32 result;
+	int err;
 
 	struct config {
 		__u32 namespace_id;
-		enum nvme_feat feature_id;
+		enum nvme_features_id feature_id;
 		__u8  sel;
 		__u32 cdw11;
 		__u32 data_len;
-		int  raw_binary;
-		int  human_readable;
+		bool  raw_binary;
+		bool  human_readable;
 	};
 
 	struct config cfg = {
 		.namespace_id = 1,
-		.feature_id   = NVME_FEAT_NONE,
+		.feature_id   = 0,
 		.sel          = 0,
 		.cdw11        = 0,
 		.data_len     = 0,
@@ -208,32 +210,45 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
 
 	if (cfg.sel > 7) {
 		fprintf(stderr, "invalid 'select' param:%d\n", cfg.sel);
-		close(fd);
+		dev_close(dev);
 		return EINVAL;
 	}
 	if (!cfg.feature_id) {
 		fprintf(stderr, "feature-id required param\n");
-		close(fd);
+		dev_close(dev);
 		return EINVAL;
 	}
 	if (cfg.data_len) {
 		if (posix_memalign(&buf, getpagesize(), cfg.data_len))
 		{
-			close(fd);
+			dev_close(dev);
 			exit(ENOMEM);
 		}
 		memset(buf, 0, cfg.data_len);
 	}
 
-	err = nvme_get_feature(fd, cfg.namespace_id, cfg.feature_id, cfg.sel, cfg.cdw11,
-			cfg.data_len, buf, &result);
+	struct nvme_get_features_args args = {
+		.args_size	= sizeof(args),
+		.fd		= dev_fd(dev),
+		.fid		= cfg.feature_id,
+		.nsid		= cfg.namespace_id,
+		.sel		= cfg.sel,
+		.cdw11		= cfg.cdw11,
+		.uuidx		= 0,
+		.data_len	= cfg.data_len,
+		.data		= buf,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= &result,
+	};
+	err = nvme_get_features(&args);
 	if (!err) {
+#if 0
 		printf("get-feature:0x%02x (%s), %s value: %#08x\n", cfg.feature_id,
 				nvme_feature_to_string(cfg.feature_id),
 				nvme_select_to_string(cfg.sel), result);
@@ -247,9 +262,9 @@ static int get_additional_feature(int argc, char **argv, struct command *cmd, st
 					d_raw(buf, cfg.data_len);
 			}
 		}
+#endif
 	} else if (err > 0)
-		fprintf(stderr, "NVMe Status:%s(%x)\n",
-				nvme_status_to_string(err), err);
+		nvme_show_status(err);
 	if (buf)
 		free(buf);
 	return err;
@@ -274,10 +289,11 @@ static int set_additional_feature(int argc, char **argv, struct command *cmd, st
 	const char *data = "optional file for feature data (default stdin)";
 	const char *value = "new value of feature (required)";
 	const char *save = "specifies that the controller shall save the attribute";
-	int err, fd;
-	__u32 result;
-	void *buf = NULL;
 	int ffd = STDIN_FILENO;
+	struct nvme_dev *dev;
+	void *buf = NULL;
+	__u32 result;
+	int err;
 
 	struct config {
 		char *file;
@@ -285,7 +301,7 @@ static int set_additional_feature(int argc, char **argv, struct command *cmd, st
 		__u32 feature_id;
 		__u32 value;
 		__u32 data_len;
-		int   save;
+		bool  save;
 	};
 
 	struct config cfg = {
@@ -307,20 +323,20 @@ static int set_additional_feature(int argc, char **argv, struct command *cmd, st
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
 
 	if (!cfg.feature_id) {
 		fprintf(stderr, "feature-id required param\n");
-		close(fd);
+		dev_close(dev);
 		return EINVAL;
 	}
 
 	if (cfg.data_len) {
 		if (posix_memalign(&buf, getpagesize(), cfg.data_len)){
 			fprintf(stderr, "can not allocate feature payload\n");
-			close(fd);
+			dev_close(dev);
 			return ENOMEM;
 		}
 		memset(buf, 0, cfg.data_len);
@@ -343,20 +359,35 @@ static int set_additional_feature(int argc, char **argv, struct command *cmd, st
 		}
 	}
 
-	err = nvme_set_feature(fd, cfg.namespace_id, cfg.feature_id, cfg.value,
-				0, cfg.save, cfg.data_len, buf, &result);
+	struct nvme_set_features_args args = {
+		.args_size	= sizeof(args),
+		.fd		= dev_fd(dev),
+		.fid		= cfg.feature_id,
+		.nsid		= cfg.namespace_id,
+		.cdw11		= cfg.value,
+		.cdw12		= 0,
+		.save		= cfg.save,
+		.uuidx		= 0,
+		.cdw15		= 0,
+		.data_len	= cfg.data_len,
+		.data		= buf,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= &result,
+	};
+	err = nvme_set_features(&args);
 	if (err < 0) {
 		perror("set-feature");
 		goto free;
 	}
 	if (!err) {
+#if 0
 		printf("set-feature:%02x (%s), value:%#08x\n", cfg.feature_id,
 			nvme_feature_to_string(cfg.feature_id), cfg.value);
+#endif
 		if (buf)
 			d(buf, cfg.data_len, 16, 1);
 	} else if (err > 0)
-		fprintf(stderr, "NVMe Status:%s(%x)\n",
-				nvme_status_to_string(err), err);
+		nvme_show_status(err);
 
 free:
 	if (buf)

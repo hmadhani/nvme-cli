@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __MEMBLAZE_UTILS_H__
 #define __MEMBLAZE_UTILS_H__
 
@@ -199,28 +200,24 @@ struct nvme_p4_smart_log
                                      printf("=Memblaze= %s[%d]-%s():%d=%s\n", \
                                      __FILE__, __LINE__, __func__, ip, argv[ip]); }while(0)
 
-#define fPRINT_PARAM1(format) \
-    { \
-        do \
-        { \
-            fprintf(fdi, format);\
-            if (print) \
-            { \
-                printf(format); \
-            } \
-        } while (0); \
+#define fPRINT_PARAM1(format)		\
+    {					\
+        do {				\
+	    if (fdi)			\
+		fprintf(fdi, format);	\
+            if (print)			\
+                printf(format);		\
+        } while (0);			\
     }
 
-#define fPRINT_PARAM2(format, value) \
-    { \
-        do \
-        { \
-            fprintf(fdi, format, value);\
-            if (print) \
-            { \
-                printf(format, value); \
-            } \
-        } while (0); \
+#define fPRINT_PARAM2(format, value)		\
+    {						\
+        do {					\
+	    if (fdi)				\
+		fprintf(fdi, format, value);	\
+            if (print)				\
+                printf(format, value);		\
+        } while (0);				\
     }
 
 #endif // __MEMBLAZE_UTILS_H__

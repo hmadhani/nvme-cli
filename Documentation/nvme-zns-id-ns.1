@@ -2,12 +2,12 @@
 .\"     Title: nvme-zns-id-ns
 .\"    Author: [FIXME: author] [see http://www.docbook.org/tdg5/en/html/author]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 10/20/2020
+.\"      Date: 08/01/2022
 .\"    Manual: NVMe Manual
 .\"    Source: NVMe
 .\"  Language: English
 .\"
-.TH "NVME\-ZNS\-ID\-NS" "1" "10/20/2020" "NVMe" "NVMe Manual"
+.TH "NVME\-ZNS\-ID\-NS" "1" "08/01/2022" "NVMe" "NVMe Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -28,7 +28,7 @@
 .\" * MAIN CONTENT STARTS HERE *
 .\" -----------------------------------------------------------------
 .SH "NAME"
-nvme-zns-id-ns \- Send NVMe Zoned Command Set Identify Controller, return result and structure
+nvme-zns-id-ns \- Send NVMe Zoned Command Set Identify namespace, return result and structure
 .SH "SYNOPSIS"
 .sp
 .nf
@@ -38,7 +38,7 @@ nvme-zns-id-ns \- Send NVMe Zoned Command Set Identify Controller, return result
 .fi
 .SH "DESCRIPTION"
 .sp
-For the NVMe device given, sends the zoned command set\(cqs identify namepsace command and provides the result and returned structure\&.
+For the NVMe device given, sends the zoned command set\(cqs identify namespace command and provides the result and returned structure\&.
 .sp
 The <device> parameter is mandatory and may be either the NVMe character device (ex: /dev/nvme0), or a namespace block device (ex: /dev/nvme0n1)\&.
 .sp

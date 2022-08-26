@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
@@ -10,12 +11,10 @@
 #include <sys/time.h>
 
 #include "nvme.h"
-#include "nvme-print.h"
-#include "nvme-ioctl.h"
+#include "libnvme.h"
 #include "plugin.h"
-
-#include "argconfig.h"
-#include "suffix.h"
+#include "linux/types.h"
+#include "nvme-print.h"
 
 #define CREATE_CMD
 #include "dera-nvme.h"
@@ -108,7 +107,7 @@ static int nvme_dera_get_device_status(int fd, enum dera_device_status *result)
 		.cdw12 = 0x104, 
 	};
 
-	err = nvme_submit_passthru(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+	err = nvme_submit_admin_passthru(fd, &cmd, NULL);
 	if (!err && result) {
 		*result = cmd.result;
 	}
@@ -118,21 +117,21 @@ static int nvme_dera_get_device_status(int fd, enum dera_device_status *result)
 
 static int get_status(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
-	int fd, err;
 	struct nvme_dera_smart_info_log log;
 	enum dera_device_status state = DEVICE_STATUS_FATAL_ERROR;
 	char *desc = "Get the Dera device status";
+	struct nvme_dev *dev;
+	int err;
 
 	OPT_ARGS(opts) = {
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0)
-		return fd;
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err)
+		return err;
 	
-	err = nvme_get_log(fd, 0xffffffff, 0xc0, false, NVME_NO_LOG_LSP,
-		sizeof(log), &log);
+	err = nvme_get_log_simple(dev_fd(dev), 0xc0, sizeof(log), &log);
 	if (err) {
 		goto exit;
 	}
@@ -155,7 +154,7 @@ static int get_status(int argc, char **argv, struct command *cmd, struct plugin 
 		"Runtime Low",
 	};
 
-	err = nvme_dera_get_device_status(fd, &state);
+	err = nvme_dera_get_device_status(dev_fd(dev), &state);
 	if (!err){
 		if (state > 0 && state < 4){
 			printf("device_status                       : %s %d%% completed\n", dev_status[state], log.rebuild_percent);
@@ -189,7 +188,7 @@ static int get_status(int argc, char **argv, struct command *cmd, struct plugin 
 	printf("fw_loader_version                   : %.*s\n", 8, log.fw_loader_version);
 	printf("uefi_driver_version                 : %.*s\n", 8, log.uefi_driver_version);
 
-	if (log.pcie_volt_status >= 0 && log.pcie_volt_status <= sizeof(volt_status) / sizeof(const char *)){
+	if (log.pcie_volt_status < sizeof(volt_status) / sizeof(const char *)){
 		printf("pcie_volt_status                    : %s\n", volt_status[log.pcie_volt_status]);
 	}
 	else{
@@ -205,8 +204,9 @@ static int get_status(int argc, char **argv, struct command *cmd, struct plugin 
 
 exit:
 	if (err > 0)
-		fprintf(stderr, "\nNVMe status:%s(0x%x)\n",	nvme_status_to_string(err), err);
+		nvme_show_status(err);
 
+	dev_close(dev);
 	return err;
 }
 

@@ -2,12 +2,12 @@
 .\"     Title: nvme-id-ns
 .\"    Author: [FIXME: author] [see http://www.docbook.org/tdg5/en/html/author]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 10/20/2020
+.\"      Date: 08/01/2022
 .\"    Manual: NVMe Manual
 .\"    Source: NVMe
 .\"  Language: English
 .\"
-.TH "NVME\-ID\-NS" "1" "10/20/2020" "NVMe" "NVMe Manual"
+.TH "NVME\-ID\-NS" "1" "08/01/2022" "NVMe" "NVMe Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -34,7 +34,7 @@ nvme-list-ns \- Send NVMe Identify List Namespaces, return result and structure
 .nf
 \fInvme list\-ns\fR <device> [\-\-namespace\-id=<nsid> | \-n <nsid>]
                         [\-\-csi=<command_set_identifier> | \-y <command_set_identifier>]
-                        [\-\-all | \-a]
+                        [\-\-all | \-a] [\-\-output\-format=<fmt> | \-o <fmt>]
 .fi
 .SH "DESCRIPTION"
 .sp
@@ -52,16 +52,63 @@ Retrieve the identify list structure starting with the given nsid\&.
 .PP
 \-y <command_set_identifier>, \-\-csi=<command_set_identifier>
 .RS 4
-If this value is given, retrieve the identify list structure associated with the speicified I/O command set\&.
+If this value is given, retrieve the identify list structure associated with the specified I/O command set\&.
 .RE
 .PP
 \-a, \-\-all
 .RS 4
 Retrieve the identify list structure for all namespaces in the subsystem, whether attached or inactive\&.
 .RE
+.PP
+\-o <format>, \-\-output\-format=<format>
+.RS 4
+Set the reporting format to
+\fInormal\fR, or
+\fIjson\fR\&. Only one output format can be used at a time\&.
+.RE
 .SH "EXAMPLES"
 .sp
-No examples yet\&.
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Print the namespaces present for zoned command set in JSON format
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+# nvme list\-ns /dev/nvme0 \-y 2 \-a \-o json
+.fi
+.if n \{\
+.RE
+.\}
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Print the namespaces present for NVM Command Set in normal format
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+# nvme list\-ns /dev/nvme0
+.fi
+.if n \{\
+.RE
+.\}
+.RE
 .SH "NVME"
 .sp
 Part of the nvme\-user suite

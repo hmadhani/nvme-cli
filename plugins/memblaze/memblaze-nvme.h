@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #undef CMD_INC_FILE
 #define CMD_INC_FILE plugins/memblaze/memblaze-nvme
 
@@ -12,7 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-PLUGIN(NAME("memblaze", "Memblaze vendor specific extensions"),
+PLUGIN(NAME("memblaze", "Memblaze vendor specific extensions", NVME_VERSION),
 	COMMAND_LIST(
 		ENTRY("smart-log-add", "Retrieve Memblaze SMART Log, show it", mb_get_additional_smart_log)
 		ENTRY("get-pm-status", "Get Memblaze Power Manager Status", mb_get_powermanager_status)

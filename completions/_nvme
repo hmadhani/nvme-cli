@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 #compdef _nvme nvme
 
 # zsh completions for the nvme command-line interface,
@@ -9,14 +11,20 @@ _nvme () {
 	_cmds=(
 	'id-ctrl:display information about the controller'
 	'id-ns:display information about the namespace'
+	'id-ns-lba-format:display information about the namespace capability fields for specific LBA format'
 	'list-ns:identify all namespace(s) attached'
+	'cmdset-ind-id-ns:display I/O Command Set Independent information about the namespace'
 	'id-iocs:display information about I/O command sets'
+	'id-domain:display information about domain list'
 	'create-ns:create a new namespace before attachment'
 	'delete-ns:delete a detached namespace'
 	'attach-ns:attach namespace to controller'
 	'detach-ns:detach namespace from controller'
 	'list-ctrl:identify all controller(s) attached'
 	'nvm-id-ctrl:display information about the nvm command set'
+	'nvm-id-ns:display information about the namespace of nvm command set'
+	'id-ns-lba-format:display information about the namespace of nvm command set capability fields for specific LBA format'
+	'list-endgrp:display information about nvme endurance group list'
 	'get-ns-id:get namespace id of opened block device'
 	'get-log:retrieve any log in raw format'
 	'predictable-lat-log:retrieve predictable latency per nvmset log'
@@ -47,7 +55,14 @@ _nvme () {
 	'compare:compare data on device to data elsewhere'
 	'read:submit a read command'
 	'write:submit a write command'
+	'capacity-mgmt: submit capacity management command'
 	'show-regs:shows the controller registers; requires admin character device'
+	'boot-part-log: retrieve boot partition log'
+	'fid-support-effects-log:retrieve fid support and effects log'
+	'supported-log-pages: retrieve support log pages details'
+	'lockdown:submit a lockdown command'
+	'media-unit-stat-log: retrieve media unit status log pages details'
+	'supported-cap-config-log: retrieve support log pages details'
 	'help:print brief descriptions of all nvme commands'
 	)
 
@@ -91,6 +106,22 @@ _nvme () {
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme id-ns options" _idns
 			;;
+		(id-ns-lba-format)
+			local _idns_lba_format
+			_idns_lba_format=(
+			/dev/nvme':supply a device to use (required)'
+			--lba-format-index=':show infos for lba format index <lba-format-index>'
+			-i':alias of --lba-format-index'
+			--uuid-index=':uuid index'
+			-U':alias for --uuid-index'
+			--output-format=':Output format: normal|json|binary'
+			-o':alias for --output-format'
+			--verbose':show infos verbosely'
+			-v':alias of --verbose'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme id-ns-lba-format options" _idns_lba_format
+			;;
 		(list-ns)
 			local _listns
 			_listns=(
@@ -103,6 +134,20 @@ _nvme () {
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme list-ns options" _listns
 			;;
+		(cmdset-ind-id-ns)
+			local _cmdset_ind_idns
+			_cmdset_ind_idns=(
+			/dev/nvme':supply a device to use (required)'
+			--namespace-id=':show infos for namespace <nsid>'
+			-n':alias of --namespace-id'
+			--raw-binary':dump infos in binary format'
+			-b':alias of --raw-binary'
+			--human-readable':show infos in readable format'
+			-H':alias of --human-readable'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme cmdset-ind-id-ns options" _cmdset_ind_idns
+			;;
 		(id-iocs)
 			local _idiocs
 			_idiocs=(
@@ -113,13 +158,65 @@ _nvme () {
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme id-iocs options" _idiocs
 			;;
-		nvm-id-ctrl)
+		(id-domain)
+			local _iddomain
+			_iddomain=(
+			/dev/nvme':supply a device to use (required)'
+			--dom-id=':show infos for domain id <cntid>'
+			-d':alias of --dom-id'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme id-domain options" _iddomain
+			;;
+		(nvm-id-ctrl)
 			local _nvmidctrl
 			_nvmidctrl=(
 			/dev/nvme':supply a device to use (required)'
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme nvm-id-ctrl options" _nvmidctrl
+			;;
+		(nvm-id-ns)
+			local _nvmidns
+			_nvmidns=(
+			/dev/nvme':supply a device to use (required)'
+			--namespace-id=':show infos for namespace <nsid>'
+			-n':alias of --namespace-id'
+			--uuid-index=':uuid index'
+			-U':alias for --uuid-index'
+			--output-format=':Output format: normal|json|binary'
+			-o':alias for --output-format'
+			--verbose':show infos verbosely'
+			-v':alias of --verbose'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme nvm-id-ns options" _nvmidns
+			;;
+		(id-ns-lba-format)
+			local _nvm_idns_lba_format
+			_nvm_idns_lba_format=(
+			/dev/nvme':supply a device to use (required)'
+			--lba-format-index=':show infos for lba format index <lba-format-index>'
+			-i':alias of --lba-format-index'
+			--uuid-index=':uuid index'
+			-U':alias for --uuid-index'
+			--output-format=':Output format: normal|json|binary'
+			-o':alias for --output-format'
+			--verbose':show infos verbosely'
+			-v':alias of --verbose'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme nvm-id-ns-lba-format options" _nvm_idns_lba_format
+			;;
+		(list-endgrp)
+			local _listendgrp
+			_listendgrp=(
+			/dev/nvme':supply a device to use (required)'
+			--endgrp-id=':endurance group id'
+			-i':alias of --endgrp-id'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme list-ns options" _listendgrp
 			;;
 		(create-ns)
 			local _createns
@@ -232,14 +329,14 @@ _nvme () {
 			--log-entries=': Number of pending NVM Set Entries log list'
 			-e':alias to --log-entries'
 			--rae': Retain an Asynchronous Event'
-			-r':alias to --rae
+			-r':alias to --rae'
 			--raw-binary':dump infos in binary format'
 			-b':alias of --raw-binary'
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme pred-lat-event-agg-log options" _predlateventagglog
 			;;
-		(predictablelatlog)
+		(predictable-lat-log)
 			local _predictablelatlog
 			_predictablelatlog=(
 			/dev/nvme':supply a device to use (required)'
@@ -306,7 +403,7 @@ _nvme () {
 			--log-entries=': Number of Endurance Group Event Agg Entries log list'
 			-e':alias to --log-entries'
 			--rae': Retain an Asynchronous Event'
-			-r':alias to --rae
+			-r':alias to --rae'
 			--raw-binary':dump infos in binary format'
 			-b':alias of --raw-binary'
 			)
@@ -318,7 +415,7 @@ _nvme () {
 			_lbastatuslog=(
 			/dev/nvme':supply a device to use (required)'
 			--rae': Retain an Asynchronous Event'
-			-r':alias to --rae
+			-r':alias to --rae'
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme lba-status-log options" _lbastatuslog
@@ -330,6 +427,18 @@ _nvme () {
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme resv-notif-log options" _resvnotiflog
+			;;
+		(boot-part-log)
+			local _bootpartlog
+			_bootpartlog=(
+			/dev/nvme':supply a device to use (required)'
+			--lsp=': log specific field'
+			-s':alias to --lsp'
+			--output-file=': boot partition data output write'
+			-f':alias for --output-file'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme boot-part-log options" _bootpartlog
 			;;
 		(get-feature)
 			local _getf
@@ -343,12 +452,32 @@ _nvme () {
 			-s':alias to --sel'
 			--data-len=':buffer len for returned LBA Type Range or host identifier data'
 			-l':alias for --data-len'
+			--uuid-index=':uuid index'
+			-U':alias for --uuid-index'
 			--cdw11=':dword 11 value, used for interrupt vector configuration only'
 			--raw-binary':dump infos in binary format'
 			-b':alias to --raw-binary'
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme get-feature options" _getf
+			;;
+		(lockdown)
+			local _lockdown
+			_lockdown=(
+			/dev/nvme':supply a device to use (required)'
+			--ofi=': Opcode or Feature Identifier(OFI) (required)'
+			-o':alias of --ofi'
+			--ifc=':Interface (INF) field Information (required)'
+			-f':alias of --ifc'
+			--prhbt=':Prohibit(PRHBT) bit field (required)'
+			-p':alias of --prhbt'
+			--scp=':Scope(SCP) field for identifying opcode or feature id (required)'
+			-s':alias of --scp'
+			--uuid=':UUID Index field required aligned with Scope'
+			-U':alias of --uuid'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme lockdown options" _lockdown
 			;;
 		(set-feature)
 			local _setf
@@ -364,6 +493,8 @@ _nvme () {
 			-d':alias to --data'
 			--value=':new value of feature (required)'
 			-v'alias to --value'
+			--uuid-index=':uuid index'
+			-U':alias for --uuid-index'
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme set-feature options" _setf
@@ -413,6 +544,56 @@ _nvme () {
 			)
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme fw-download options" _fwd
+			;;
+		(capacity-mgmt)
+			local _fwd
+			_fwd=(
+			/dev/nvme':supply a device to use (required)'
+			--operation=':Operation to be performed by the controller'
+			-o':alias of --operation'
+			--element-id=':specific to the value of the Operation field'
+			-i':alias of --element-id'
+			--cap-lower=':Least significant 32 bits of the capacity in bytes'
+			-l':alias of --cap-lower'
+			--cap-upper=':Most significant 32 bits of the capacity in bytes'
+			-u':alias of --cap-upper'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme capacity-mgmt options" _fwd
+			;;
+		(supported-log-pages)
+			local _support
+			_support=(
+			/dev/nvme':supply a device to use (required)'
+			--human-readable':show infos in readable format'
+			-H':alias of --human-readable'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme supported-log-pages options" _support
+			;;
+		(media-unit-stat-log)
+			local _medialog
+			_medialog=(
+			/dev/nvme':supply a device to use (required)'
+			--dom-id=':show infos for domain id'
+			-d':alias of --dom-id'
+			--raw-binary':dump infos in binary format'
+			-b':alias of --raw-binary'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme media-unit-stat-log" _medialog
+			;;
+		(supported-cap-config-log)
+			local _caplog
+			_caplog=(
+			/dev/nvme':supply a device to use (required)'
+			--dom-id=':show infos for domain id'
+			-d':alias of --dom-id'
+			--raw-binary':dump infos in binary format'
+			-b':alias of --raw-binary'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme supported-cap-config-log" _caplog
 			;;
 		(admin-passthru)
 			local _admin
@@ -558,7 +739,7 @@ _nvme () {
 			-p':alias for --prkey'
 			--rtype=':hexadecimal reservation type'
 			-t':alias for --rtype'
-			--racqa=':reservation acquiry action'
+			--racqa=':reservation acquire action'
 			-a':alias for --racqa'
 			--iekey=':ignore existing reservation key'
 			-i':alias for --iekey'
@@ -592,6 +773,8 @@ _nvme () {
 			-n':alias of --namespace-id'
 			--numd=':number of dwords of reservation status to xfer'
 			-d':alias of --numd'
+			--eds':request extended data structure'
+			-e':alias of --eds'
 			--raw-binary':dump output in binary format'
 			-b':alias of --raw-binary'
 			)
@@ -611,7 +794,7 @@ _nvme () {
 			--cptpl=':change persistence through power loss setting'
 			-p':alias for --cptpl'
 			--rrega=':reservation registration action to perform'
-			-a':alias for --rrega'
+			-r':alias for --rrega'
 			--iekey':ignore existing reservation key'
 			-i':alias for --iekey'
 			)
@@ -780,6 +963,14 @@ _nvme () {
 			_arguments '*:: :->subcmds'
 			_describe -t commands "nvme show-regs options" _shor
 			;;
+		(fid-support-effects-log)
+			local _fidsupporteffectslog
+			_fidsupporteffectslog=(
+			/dev/nvme':supply a device to use (required)'
+			)
+			_arguments '*:: :->subcmds'
+			_describe -t commands "nvme fid-support-effects-log options" _fidsupporteffectslog
+			;;
 		(help)
 			local _h
 			_h=( id-ctrl id-ns list-ns id-iocs create-ns delete-ns attach-ns detach-ns
@@ -788,7 +979,9 @@ _nvme () {
 			     security-send security-recv resv-acquire resv-register resv-release
 			     resv-report flush compare read write copy show-regs persistent-event-log
 				 pred-lat-event-agg-log nvm-id-ctrl endurance-event-agg-log lba-status-log
-				 resv-notif-log
+				 resv-notif-log capacity-mgmt id-domain boot-part-log fid-support-effects-log
+				 supported-log-pages lockdown media-unit-stat-log id-ns-lba-format nvm-id-ns
+				 nvm-id-ns-lba-format supported-cap-config-log
 			   )
 			_arguments '*:: :->subcmds'
 			_describe -t commands "help: infos on a specific nvme command, or provide no option to see a synopsis of all nvme commands" _h

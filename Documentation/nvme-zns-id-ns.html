@@ -4,8 +4,8 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
 <head>
 <meta http-equiv="Content-Type" content="application/xhtml+xml; charset=UTF-8" />
-<meta name="generator" content="AsciiDoc 8.6.10" />
-<title>nvme-zns-id-ctrl(1)</title>
+<meta name="generator" content="AsciiDoc 10.2.0" />
+<title>nvme-zns-id-ns(1)</title>
 <style type="text/css">
 /* Shared CSS for AsciiDoc xhtml11 and html5 backends */
 
@@ -436,7 +436,7 @@ thead, p.table.header {
 p.table {
   margin-top: 0;
 }
-/* Because the table frame attribute is overriden by CSS in most browsers. */
+/* Because the table frame attribute is overridden by CSS in most browsers. */
 div.tableblock > table[frame="void"] {
   border-style: none;
 }
@@ -735,12 +735,12 @@ asciidoc.install();
 <body class="manpage">
 <div id="header">
 <h1>
-nvme-zns-id-ctrl(1) Manual Page
+nvme-zns-id-ns(1) Manual Page
 </h1>
 <h2>NAME</h2>
 <div class="sectionbody">
-<p>nvme-zns-id-ctrl -
-   Send NVMe Zoned Command Set Identify Controller, return                    result and structure
+<p>nvme-zns-id-ns -
+   Send NVMe Zoned Command Set Identify namespace, return                    result and structure
 </p>
 </div>
 </div>
@@ -749,7 +749,7 @@ nvme-zns-id-ctrl(1) Manual Page
 <h2 id="_synopsis">SYNOPSIS</h2>
 <div class="sectionbody">
 <div class="verseblock">
-<pre class="content"><em>nvme zns id-ctrl</em> &lt;device&gt;  [--namespace-id=&lt;NUM&gt; | -n &lt;NUM&gt;]
+<pre class="content"><em>nvme zns id-ns</em> &lt;device&gt;  [--namespace-id=&lt;NUM&gt; | -n &lt;NUM&gt;]
                              [-o &lt;fmt&gt; | --output-format=&lt;fmt&gt;]
                              [-v | --verbose]</pre>
 <div class="attribution">
@@ -759,7 +759,7 @@ nvme-zns-id-ctrl(1) Manual Page
 <div class="sect1">
 <h2 id="_description">DESCRIPTION</h2>
 <div class="sectionbody">
-<div class="paragraph"><p>For the NVMe device given, sends the zoned command set&#8217;s identify namepsace
+<div class="paragraph"><p>For the NVMe device given, sends the zoned command set&#8217;s identify namespace
 command and provides the result and returned structure.</p></div>
 <div class="paragraph"><p>The &lt;device&gt; parameter is mandatory and may be either the NVMe character
 device (ex: /dev/nvme0), or a namespace block device (ex: /dev/nvme0n1).</p></div>
@@ -830,7 +830,7 @@ Show the output in json format with extra details
 </p>
 <div class="listingblock">
 <div class="content">
-<pre><code># nvme zns id-ctrl /dev/nvme0 -o json -v</code></pre>
+<pre><code># nvme zns id-ns /dev/nvme0 -o json -v</code></pre>
 </div></div>
 </li>
 </ul></div>
@@ -847,7 +847,7 @@ Show the output in json format with extra details
 <div id="footer">
 <div id="footer-text">
 Last updated
- 2020-06-16 08:05:24 PDT
+ 2022-08-01 14:48:50 CEST
 </div>
 </div>
 </body>

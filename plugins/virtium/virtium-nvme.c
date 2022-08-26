@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
@@ -9,13 +10,10 @@
 #include <time.h>
 #include <locale.h>
 
-#include "linux/nvme_ioctl.h"
+#include "common.h"
 #include "nvme.h"
-#include "nvme-print.h"
-#include "nvme-ioctl.h"
+#include "libnvme.h"
 #include "plugin.h"
-#include "argconfig.h"
-#include "suffix.h"
 
 #define CREATE_CMD
 #include "virtium-nvme.h"
@@ -35,7 +33,7 @@ struct vtview_log_header {
 	char			test_name[256];
 	long int		time_stamp;
 	struct nvme_id_ctrl	raw_ctrl;
-	struct nvme_firmware_log_page   raw_fw;
+	struct nvme_firmware_slot raw_fw;
 };
 
 struct vtview_smart_log_entry {
@@ -124,6 +122,8 @@ static void vt_convert_smart_data_to_human_readable_format(struct vtview_smart_l
 	double capacity;
 	char *curlocale;
 	char *templocale;
+	__u8 lba_index;
+	nvme_id_ns_flbas_to_lbaf_inuse(smart->raw_ns.flbas, &lba_index);
 
 	curlocale = setlocale(LC_ALL, NULL);
 	templocale = strdup(curlocale);
@@ -133,7 +133,7 @@ static void vt_convert_smart_data_to_human_readable_format(struct vtview_smart_l
 
 	setlocale(LC_ALL, "C");
 
-	long long int lba = 1 << smart->raw_ns.lbaf[(smart->raw_ns.flbas & 0x0f)].ds;
+	unsigned long long int lba = 1ULL << smart->raw_ns.lbaf[lba_index].ds;
 	capacity = le64_to_cpu(smart->raw_ns.nsze) * lba;
 
 	snprintf(tempbuff, sizeof(tempbuff), "log;%s;%lu;%s;%s;%-.*s;", smart->raw_ctrl.sn, smart->time_stamp, smart->path,
@@ -271,26 +271,26 @@ static void vt_process_string(char *str, const size_t size)
 static int vt_add_entry_to_log(const int fd, const char *path, const struct vtview_save_log_settings *cfg)
 {
 	struct vtview_smart_log_entry smart;
-	char filename[256] = "";
+	const char *filename;
 	int ret = 0;
-	int nsid = 0;
+	unsigned nsid = 0;
 
 	memset(smart.path, 0, sizeof(smart.path));
-	strcpy(smart.path, path);
+	strncpy(smart.path, path, sizeof(smart.path) - 1);
 	if(NULL == cfg->output_file)
-		strcpy(filename, vt_default_log_file_name);
+		filename = vt_default_log_file_name;
 	else
-		strcpy(filename, cfg->output_file);
+		filename = cfg->output_file;
 
 	smart.time_stamp = time(NULL);
-	nsid = nvme_get_nsid(fd);
+	ret = nvme_get_nsid(fd, &nsid);
 
-	if (nsid <= 0) {
+	if (ret < 0) {
 		printf("Cannot read namespace-id\n");
 		return -1;
 	}
 
-	ret = nvme_identify_ns(fd, nsid, 0, &smart.raw_ns);
+	ret = nvme_identify_ns(fd, nsid, &smart.raw_ns);
 	if (ret) {
 		printf("Cannot read namespace identify\n");
 		return -1;
@@ -302,7 +302,7 @@ static int vt_add_entry_to_log(const int fd, const char *path, const struct vtvi
 		return -1;
 	}
 
-	ret = nvme_smart_log(fd, NVME_NSID_ALL, &smart.raw_smart);
+	ret = nvme_get_log_smart(fd, NVME_NSID_ALL, false, &smart.raw_smart);
 	if (ret) {
 		printf("Cannot read device SMART log\n");
 		return -1;
@@ -318,21 +318,32 @@ static int vt_add_entry_to_log(const int fd, const char *path, const struct vtvi
 static int vt_update_vtview_log_header(const int fd, const char *path, const struct vtview_save_log_settings *cfg)
 {
 	struct vtview_log_header header;
-	char filename[256] = "";
+	const char *filename;
 	int ret = 0;
 
 	vt_initialize_header_buffer(&header);
+	if (strlen(path) > sizeof(header.path)) {
+		printf("filename too long\n");
+		errno = EINVAL;
+		return -1;
+	}
 	strcpy(header.path, path);
 
 	if (NULL == cfg->test_name)
 		strcpy(header.test_name, DEFAULT_TEST_NAME);
-	else
+	else {
+		if (strlen(cfg->test_name) > sizeof(header.test_name)) {
+			printf("test name too long\n");
+			errno = EINVAL;
+			return -1;
+		}
 		strcpy(header.test_name, cfg->test_name);
+	}
 
 	if(NULL == cfg->output_file)
-		strcpy(filename, vt_default_log_file_name);
+		filename = vt_default_log_file_name;
 	else
-		strcpy(filename, cfg->output_file);
+		filename = cfg->output_file;
 
 	printf("Log file: %s\n", filename);
 	header.time_stamp = time(NULL);
@@ -343,7 +354,7 @@ static int vt_update_vtview_log_header(const int fd, const char *path, const str
 		return -1;
 	}
 
-	ret = nvme_fw_log(fd, &header.raw_fw);
+	ret = nvme_get_log_fw_slot(fd, false, &header.raw_fw);
 	if (ret) {
 		printf("Cannot read device firmware log\n");
 		return -1;
@@ -445,7 +456,7 @@ static void vt_build_power_state_descriptor(const struct nvme_id_ctrl *ctrl)
 		vt_convert_data_buffer_to_hex_string(&buf[16], 4, true, s);
 		printf("%9sh", s);
 
-		temp = ctrl->psd[i].idle_scale;
+		temp = ctrl->psd[i].ips;
 		snprintf(s, sizeof(s), "%u%u", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
 		printf("%3sb", s);
 
@@ -454,7 +465,7 @@ static void vt_build_power_state_descriptor(const struct nvme_id_ctrl *ctrl)
 		vt_convert_data_buffer_to_hex_string(&buf[20], 4, true, s);
 		printf("%9sh", s);
 
-		temp = ctrl->psd[i].active_work_scale;
+		temp = ctrl->psd[i].apws;
 		snprintf(s, sizeof(s), "%u%u", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
 		printf("%3sb", s);
 		snprintf(s, sizeof(s), "%u%u%u", (((unsigned char)temp) & 0x01), (((unsigned char)temp >> 1) & 0x01), (((unsigned char)temp >> 2) & 0x01));
@@ -916,8 +927,7 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
 
 static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
-	int err = 0;
-	int fd, ret;
+	int ret, err = 0;
 	long int total_time = 0;
 	long int freq_time = 0;
 	long int cur_time = 0;
@@ -938,6 +948,7 @@ static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cm
 	const char *freq = "(optional) How often you want to log SMART data (0.25 = 15' , 0.5 = 30' , 1 = 1 hour, 2 = 2 hours, etc.). Default = 10 hours.";
 	const char *output_file = "(optional) Name of the log file (give it a name that easy for you to remember what the test is). You can leave it blank too, we will take care it for you.";
 	const char *test_name = "(optional) Name of the test you are doing. We use this as part of the name of the log file.";
+	struct nvme_dev *dev;
 
 	struct vtview_save_log_settings cfg = {
 		.run_time_hrs = 20,
@@ -956,13 +967,18 @@ static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cm
 
 	vt_generate_vtview_log_file_name(vt_default_log_file_name);
 
-	if (argc >= 2)
+	if (argc >= 2) {
+		if (strlen(argv[1]) > sizeof(path) - 1) {
+			printf("Filename too long\n");
+			return -1;
+		}
 		strcpy(path, argv[1]);
+	}
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0) {
-		printf("Error parse and open (fd = %d)\n", fd);
-		return (fd);
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err) {
+		printf("Error parse and open (err = %d)\n", err);
+		return err;
 	}
 
 	printf("Running...\n");
@@ -970,10 +986,10 @@ static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cm
 	printf("Running for %lf hour(s)\n", cfg.run_time_hrs);
 	printf("Logging SMART data for every %lf hour(s)\n", cfg.log_record_frequency_hrs);
 
-	ret = vt_update_vtview_log_header(fd, path, &cfg);
+	ret = vt_update_vtview_log_header(dev_fd(dev), path, &cfg);
 	if (ret) {
 		err = EINVAL;
-		close(fd);
+		dev_close(dev);
 		return (err);
 	}
 
@@ -993,7 +1009,7 @@ static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cm
 		if(cur_time >= end_time)
 			break;
 
-		ret = vt_add_entry_to_log(fd, path, &cfg);
+		ret = vt_add_entry_to_log(dev_fd(dev), path, &cfg);
 		if (ret) {
 			printf("Cannot update driver log\n");
 			break;
@@ -1005,15 +1021,15 @@ static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cm
 		fflush(stdout);
 	}
 
-	close (fd);
+	dev_close(dev);
 	return (err);
 }
 
 static int vt_show_identify(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
-	int err = 0;
-	int fd ,ret;
+	int ret, err = 0;
 	struct nvme_id_ctrl ctrl;
+	struct nvme_dev *dev;
 	char *desc = "Parse identify data to json format\n\n"
 		"Typical usages:\n\n"
 		"virtium show-identify /dev/yourDevice\n";
@@ -1022,16 +1038,16 @@ static int vt_show_identify(int argc, char **argv, struct command *cmd, struct p
 		OPT_END()
 	};
 
-	fd = parse_and_open(argc, argv, desc, opts);
-	if (fd < 0) {
-		printf("Error parse and open (fd = %d)\n", fd);
-		return (fd);
+	err = parse_and_open(&dev, argc, argv, desc, opts);
+	if (err) {
+		printf("Error parse and open (err = %d)\n", err);
+		return err;
 	}
 
-	ret = nvme_identify_ctrl(fd, &ctrl);
+	ret = nvme_identify_ctrl(dev_fd(dev), &ctrl);
 	if (ret) {
 		printf("Cannot read identify device\n");
-		close (fd);
+		dev_close(dev);
 		return (-1);
 	}
 
@@ -1039,6 +1055,6 @@ static int vt_show_identify(int argc, char **argv, struct command *cmd, struct p
 	vt_process_string(ctrl.mn, sizeof(ctrl.mn));
 	vt_parse_detail_identify(&ctrl);
 
-	close(fd);
+	dev_close(dev);
 	return (err);
 }

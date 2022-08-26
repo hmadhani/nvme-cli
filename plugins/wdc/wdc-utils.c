@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2017-2018 Western Digital Corporation or its affiliates.
  *
@@ -77,7 +78,11 @@ int wdc_UtilsGetTime(PUtilsTimeInfo timeInfo)
 	timeInfo->second		=  currTimeInfo.tm_sec;
 	timeInfo->msecs			=  0;
 	timeInfo->isDST			=  currTimeInfo.tm_isdst;
+#if defined(__GLIBC__) && !defined(__UCLIBC__) && !defined(__MUSL__)
 	timeInfo->zone			= -currTimeInfo.tm_gmtoff / 60;
+#else
+	timeInfo->zone 			= -1 * (timezone / SECONDS_IN_MIN);
+#endif
 
 	return WDC_STATUS_SUCCESS;
 }

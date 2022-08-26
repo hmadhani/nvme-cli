@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  * Copyright 2014 PMC-Sierra, Inc.
@@ -38,7 +39,7 @@
 #include <stdarg.h>
 
 enum argconfig_types {
-	CFG_NONE,
+	CFG_FLAG,
 	CFG_STRING,
 	CFG_INT,
 	CFG_SIZE,
@@ -65,7 +66,7 @@ enum argconfig_types {
 #define OPT_END() { NULL }
 
 #define OPT_FLAG(l, s, v, d) \
-	{l, s, NULL, CFG_NONE, v, no_argument, d}
+	{l, s, NULL, CFG_FLAG, v, no_argument, d}
 
 #define OPT_SUFFIX(l, s, v, d) \
 	{l, s, "IONUM", CFG_LONG_SUFFIX, v, required_argument, d}
@@ -91,12 +92,16 @@ enum argconfig_types {
 #define OPT_SHRT(l, s, v, d) \
 	{l, s, "NUM", CFG_SHORT, v, required_argument, d}
 
+#define OPT_INCR(l, s, v, d) \
+	{l, s, "NUM", CFG_INCREMENT, v, no_argument, d}
+
 #define OPT_STRING(l, s, m, v, d) \
 	{l, s, m, CFG_STRING, v, required_argument, d}
 
 #define OPT_FMT(l, s, v, d)  OPT_STRING(l, s, "FMT", v, d)
 #define OPT_FILE(l, s, v, d) OPT_STRING(l, s, "FILE", v, d)
 #define OPT_LIST(l, s, v, d) OPT_STRING(l, s, "LIST", v, d)
+#define OPT_STR(l, s, v, d) OPT_STRING(l, s, "STRING", v, d)
 
 struct argconfig_commandline_options {
 	const char *option;
@@ -121,6 +126,8 @@ int argconfig_parse_subopt_string(char *string, char **options,
 				  size_t max_options);
 int argconfig_parse_comma_sep_array(char *string, int *ret,
 					 unsigned max_length);
+int argconfig_parse_comma_sep_array_short(char *string, unsigned short *ret,
+					  unsigned max_length);
 int argconfig_parse_comma_sep_array_long(char *string,
 					      unsigned long long *ret,
 					      unsigned max_length);

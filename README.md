@@ -1,10 +1,30 @@
 # nvme-cli
+![Coverity Scan Build Status](https://scan.coverity.com/projects/24883/badge.svg)
+![MesonBuild](https://github.com/linux-nvme/nvme-cli/actions/workflows/meson.yml/badge.svg)
+![GitHub](https://img.shields.io/github/license/linux-nvme/nvme-cli)
+
 NVM-Express user space tooling for Linux.
+
+nvme-cli uses meson as build system. In order to build nvme-cli
+run following commands
+
+	$ meson .build
+	$ ninja -C .build
+
+nvme-cli depends on zlib, json-c and libuuid.
 
 To install, run:
 
+	# meson install -C .build
+
+There is a Makefile wrapper for meson for backwards compatiblily
+
     $ make
     # make install
+
+RPM build support via Makefile that uses meson
+
+    $ make rpm
 
 If not sure how to use, find the top-level documentation with:
 
@@ -80,36 +100,38 @@ $ nix-env -f '<nixpkgs>' -iA nvme-cli
 
 ### openSUSE
 
-nvme-cli is available in openSUSE Leap 42.2 or later and Tumbleweed. You can install it using zypper.
-For example:
+nvme-cli is available in openSUSE Leap 42.2 or later and Tumbleweed. You can
+install it using zypper. For example:
 
     $ sudo zypper install nvme-cli
 
 ### Ubuntu
 
-nvme-cli is supported in the Universe package sources for Xenial for
+nvme-cli is supported in the Universe package sources for
 many architectures. For a complete list try running:
   ```
   rmadison nvme-cli
-   nvme-cli | 0.3-1 | xenial/universe | source, amd64, arm64, armhf, i386, powerpc, ppc64el, s390x
+   nvme-cli | 0.5-1          | xenial/universe         | source, amd64, arm64, armhf, i386, powerpc, ppc64el, s390x
+   nvme-cli | 0.5-1ubuntu0.2 | xenial-updates/universe | source, amd64, arm64,       armhf, i386, powerpc, ppc64el, s390x
+   nvme-cli | 1.5-1          | bionic/universe         | source, amd64, arm64,       armhf, i386, ppc64el, s390x
+   nvme-cli | 1.5-1ubuntu1.2 | bionic-updates          | source, amd64, arm64,       armhf, i386, ppc64el, s390x
+   nvme-cli | 1.9-1          | focal/universe          | source, amd64, arm64,       armhf, ppc64el, riscv64, s390x
+   nvme-cli | 1.9-1ubuntu0.1 | focal-updates           | source, amd64, arm64,       armhf, ppc64el, riscv64, s390x
+   nvme-cli | 1.14-1         | impish                  | source, amd64, arm64,       armhf, ppc64el, riscv64, s390x
+   nvme-cli | 1.16-3         | jammy                   | source, amd64, arm64,       armhf, ppc64el, riscv64, s390x
   ```
 A Debian based package for nvme-cli is currently maintained as a
-Ubuntu PPA. Right now there is support for Trusty, Vivid and Wiley. To
-install nvme-cli using this approach please perform the following
+Ubuntu PPA. To install nvme-cli using this approach please perform the following
 steps:
-   1. Add the sbates PPA to your sources. One way to do this is to run
-   ```
-   sudo add-apt-repository ppa:sbates
-   ```
-   2. Perform an update of your repository list:
+   1. Perform an update of your repository list:
    ```
    sudo apt-get update
    ```
-   3. Get nvme-cli!
+   2. Get nvme-cli!
    ```
    sudo apt-get install nvme-cli
    ```
-   4. Test the code.
+   3. Test the code.
    ```
    sudo nvme list
    ```
@@ -219,4 +241,25 @@ File: foo-plugin.c
 ```
 
 After that, you just need to implement the functions you defined in each
-ENTRY, then append the object file name to the Makefile's "OBJS".
+ENTRY, then append the object file name to the meson.build "sources".
+
+## meson tips
+
+In case meson doesn't find libnvme header files (via pkg-config) it 
+will fallback using subprojects.  meson checks out libnvme in 
+subprojects directory as git tree once to the commit level specified 
+in the libnvme.wrap file revision parm.  After this initial checkout,
+the libnvme code level will not change unless explicitly told.  That 
+means if the current branch is updated via git, the subprojects/libnvme
+branch will not updated accordingly.  To update it, either use the 
+normal git operations or the command: 
+
+    $ meson subprojects update
+
+## Dependency
+
+libnvme depends on the /sys/class/nvme-subsystem interface which was
+introduced in the Linux kernel release v4.15. Hence nvme-cli 2.x is
+only working on kernels >= v4.15. For older kernels nvme-cli 1.x is
+recommended to be used.
+

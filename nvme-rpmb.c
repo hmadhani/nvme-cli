@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2020 Micron Techology Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -25,10 +27,11 @@
 #include <sys/socket.h>
 #include <linux/if_alg.h>
 #include <linux/socket.h>
+#include <limits.h>
 
+#include "common.h"
 #include "nvme.h"
-#include "nvme-print.h"
-#include "nvme-ioctl.h"
+#include "libnvme.h"
 
 #define CREATE_CMD
 
@@ -66,6 +69,10 @@ unsigned char *create_hash(const char *algo,
 	};
 
 	/* copy algorith name */
+	if (strlen(algo) > sizeof(provider_sa.salg_name)) {
+		fprintf(stderr, "%s: algorithm name overflow", __func__);
+		return hash;
+	}
 	memcpy(provider_sa.salg_name, algo, strlen(algo));
 
     	/* open netlink socket connection to algorigm provider and bind */
@@ -77,7 +84,7 @@ unsigned char *create_hash(const char *algo,
     	error = bind(infd, (struct sockaddr *)&provider_sa, sizeof(provider_sa));
 	if (error < 0) {
 		perror("bind");
-		goto out;
+		goto out_close_infd;
 	}
 
 	/* if algorithm requires key, set it first - empty keys not accepted !*/
@@ -85,27 +92,27 @@ unsigned char *create_hash(const char *algo,
         	error = setsockopt(infd, SOL_ALG, ALG_SET_KEY, key, keylen);
 		if (error < 0) {
 			perror("setsockopt");
-			goto out;
+			goto out_close_infd;
 		}
 	}
-		
+
     	/* now send data to hash */
     	outfd = accept(infd, NULL, 0);
 	if (outfd < 0) {
 		perror("accept");
-		goto out;
+		goto out_close_infd;
 	}
     	error = send(outfd, data, datalen, 0);
 	if (error < 0) {
 		perror("send");
-		goto out;
+		goto out_close_outfd;
 	}
 
 	/* read computed hash */
     	hash = (unsigned char *)calloc(hash_size, 1);
 	if (hash == NULL) {
         	perror("calloc");
-		goto out;
+		goto out_close_outfd;
     	}
 
     	error = read(outfd, hash, hash_size);
@@ -114,11 +121,12 @@ unsigned char *create_hash(const char *algo,
         	free(hash);
         	hash = NULL;
     	}
-out:
-    if (outfd > 0) close(outfd);
-    if (infd > 0)  close(infd);
+out_close_outfd:
+	close(outfd);
+out_close_infd:
+	close(infd);
 
-    return hash;
+	return hash;
 }
 
 /* Function that computes hmac-sha256 hash of given data and key pair. Returns
@@ -186,9 +194,9 @@ static int read_file(const char *file, unsigned char **data, unsigned int *len)
 		free(buf);
 		goto out;
 	}
-	err -= size;
 	*data = buf; 
-	*len = size;
+	*len = err;
+	err = 0;
 out:
 	close(fd);
 	return err;
@@ -265,14 +273,49 @@ struct rpmb_config_block_t {
 #define RPMB_NVME_SECP        0xEA 
 #define RPMB_NVME_SPSP        0x0001
 
-#define SEND_RPMB_REQ(tgt, size, req) \
-nvme_sec_send(fd, 0, tgt, RPMB_NVME_SPSP, RPMB_NVME_SECP, size, size, \
-		(unsigned char *)(req))
-	
-#define RECV_RPMB_RSP(tgt, size, rsp) \
-nvme_sec_recv(fd, 0, tgt, RPMB_NVME_SPSP, RPMB_NVME_SECP, size, size, \
-		(unsigned char *)(rsp))
-	
+static int send_rpmb_req(int fd, unsigned char tgt, int size,
+			 struct rpmb_data_frame_t *req)
+{
+	struct nvme_security_send_args args = {
+		.args_size	= sizeof(args),
+		.fd		= fd,
+		.nsid		= 0,
+		.nssf		= tgt,
+		.spsp0		= RPMB_NVME_SPSP,
+		.spsp1		= 0,
+		.secp		= RPMB_NVME_SECP,
+		.tl		= 0,
+		.data_len	= size,
+		.data		= (void *)req,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= NULL,
+	};
+
+	return nvme_security_send(&args);
+}
+
+static int recv_rpmb_rsp(int fd, int tgt, int size,
+			 struct rpmb_data_frame_t *rsp)
+{
+
+	struct nvme_security_receive_args args = {
+		.args_size	= sizeof(args),
+		.fd		= fd,
+		.nsid		= 0,
+		.nssf		= tgt,
+		.spsp0		= RPMB_NVME_SPSP,
+		.spsp1		= 0,
+		.secp		= RPMB_NVME_SECP,
+		.al		= 0,
+		.data_len	= size,
+		.data		= (void *)rsp,
+		.timeout	= NVME_DEFAULT_IOCTL_TIMEOUT,
+		.result		= NULL,
+	};
+
+	return nvme_security_receive(&args);
+}
+
 /* Initialize nonce value in rpmb request frame */
 static void rpmb_nonce_init(struct rpmb_data_frame_t *req)
 {
@@ -285,10 +328,14 @@ static void rpmb_nonce_init(struct rpmb_data_frame_t *req)
 static unsigned char *read_rpmb_key(char *keystr, char *keyfile, unsigned int *keysize)
 {
 	unsigned char *keybuf = NULL;
+	int err;
 	
 	if (keystr == NULL) {
-		if (keyfile != NULL)
-			read_file(keyfile, &keybuf, keysize);
+		if (keyfile != NULL) {
+			err = read_file(keyfile, &keybuf, keysize);
+			if (err < 0)
+				return NULL;
+		}
 	} else if ((keybuf = (unsigned char *)malloc(strlen(keystr))) != NULL) {
 		*keysize = strlen(keystr);
 		memcpy(keybuf, keystr, *keysize);
@@ -385,7 +432,7 @@ rpmb_read_request(int fd,
 	sprintf((char *)msg, "RPMB request 0x%04x to target 0x%x",
 		req->type, req->target);
 
-	error = SEND_RPMB_REQ(req->target, req_size, req);
+	error = send_rpmb_req(fd, req->target, req_size, req);
 	if (error != 0) {
 		fprintf(stderr, "%s failed with error = 0x%x\n",
 			msg, error);
@@ -400,7 +447,7 @@ rpmb_read_request(int fd,
 	}
 
 	/* Read result of previous request */
-	error = RECV_RPMB_RSP(req->target, rsp_size, rsp);
+	error = recv_rpmb_rsp(fd, req->target, rsp_size, rsp);
 	if (error) {
 		fprintf(stderr, "error 0x%x receiving response for %s\n",
 			error, msg);
@@ -412,7 +459,7 @@ rpmb_read_request(int fd,
 	if (error == 0) return rsp;
 
 error_out:
-	if (rsp) free(rsp);
+	free(rsp);
 	return NULL;
 }
 
@@ -436,8 +483,8 @@ static int rpmb_read_write_counter(int fd,
 	error = 0;
 	
 out:
-	if (req) free(req);
-	if (rsp) free(rsp);
+	free(req);
+	free(rsp);
 	return error;
 }
 
@@ -459,10 +506,12 @@ static unsigned int rpmb_read_config_block(int fd, unsigned char **config_buf)
 	/* initialize request with nonce, no data on input */
 	req = rpmb_request_init(req_size, RPMB_REQ_AUTH_DCB_READ, 0, 1, 0, 1,
 				0, 0, 0);
-	if ((req == NULL) ||
-	    (rsp = rpmb_read_request(fd, req, req_size, rsp_size)) == NULL)
+	if (!req)
+		return 0;
+	if ((rsp = rpmb_read_request(fd, req, req_size, rsp_size)) == NULL)
 	{
-		goto out;
+		free(req);
+		return 0;
 	}	
 
 	/* copy configuration data to be sent back to caller */
@@ -477,9 +526,8 @@ static unsigned int rpmb_read_config_block(int fd, unsigned char **config_buf)
 	cfg = NULL;
 	retval = rsp->write_counter;
 out:
-	if (req) free(req);
-	if (rsp) free(rsp);
-	if (cfg) free(cfg);
+	free(req);
+	free(rsp);
 	return retval;
 }
 
@@ -508,12 +556,13 @@ static int rpmb_auth_data_read(int fd, unsigned char target,
 		rsp_size = req_size + xfer * 512;
 		req = rpmb_request_init(req_size, RPMB_REQ_AUTH_DATA_READ,
 					target, 1, offset, xfer, 0, 0, 0);
-		if (req == NULL) break;
+		if (req == NULL)
+			break;
 		if ((rsp = rpmb_read_request(fd, req, req_size, rsp_size)) == NULL)
 		{
 			fprintf(stderr, "read_request failed\n");
-			free(rsp);
-			goto out;
+			free(req);
+			break;
 		}
 
 		data_size = rsp->sectors * 512;
@@ -561,13 +610,13 @@ static int rpmb_program_auth_key(int fd, unsigned char target,
 
 	/* re-use response buffer */
 	memset(rsp, 0, rsp_size);
-	err = RECV_RPMB_RSP(req->target, rsp_size, (unsigned char *)rsp);
+	err = recv_rpmb_rsp(fd, req->target, rsp_size, rsp);
 	if (err != 0) {
 		err = check_rpmb_response(req, rsp, "Failed to Program Key");
 	}
 out:
-	if (req) free(req);
-	if (rsp) free(rsp);
+	free(req);
+	free(rsp);
 	
 	return err;
 }
@@ -621,7 +670,7 @@ static int auth_data_write_chunk(int fd, unsigned char tgt, unsigned int addr,
 	memcpy(req->mac, mac, 32);
 	
 	/* send the request and get response */
-	error = SEND_RPMB_REQ(tgt, req_size, (unsigned char *)req);
+	error = send_rpmb_req(fd, tgt, req_size, req);
 	if (error != 0) {
 	    fprintf(stderr, "RPMB request 0x%04x for 0x%x, error: %d\n",
 		    req->type, tgt, error);
@@ -632,7 +681,7 @@ static int auth_data_write_chunk(int fd, unsigned char tgt, unsigned int addr,
         rsp = (struct rpmb_data_frame_t *)calloc(rsp_size, 1);
 	rsp->target = req->target;
 	rsp->type = RPMB_REQ_READ_RESULT;
-	error = SEND_RPMB_REQ(tgt, rsp_size, (unsigned char *)rsp);
+	error = send_rpmb_req(fd, tgt, rsp_size, rsp);
 	if (error != 0 || rsp->result != 0) {
 		fprintf(stderr, "Write-data read result 0x%x, error = 0x%x\n",
 			rsp->result, error);
@@ -641,15 +690,15 @@ static int auth_data_write_chunk(int fd, unsigned char tgt, unsigned int addr,
 
 	/* Read final response */
 	memset(rsp, 0, rsp_size);
-	error = RECV_RPMB_RSP(tgt, rsp_size, (unsigned char *)rsp);
+	error = recv_rpmb_rsp(fd, tgt, rsp_size, rsp);
 	if (error != 0)
 		fprintf(stderr, "Auth data write recv error = 0x%x\n", error);
 	else 
     		error = check_rpmb_response(req, rsp, "Failed to write-data");
 out:
-	if (req) free(req);
-	if (rsp) free(rsp);
-	if (mac) free(mac);
+	free(req);
+	free(rsp);
+	free(mac);
 
 	return error;
 }
@@ -726,7 +775,7 @@ static int rpmb_write_config_block(int fd, unsigned char *cfg_buf,
 	
 	memcpy(req->mac, mac, sizeof(req->mac)); 
 	
-	error = SEND_RPMB_REQ(0, req_size, (unsigned char *)req);
+	error = send_rpmb_req(fd, 0, req_size, req);
 	if (error != 0) {
 		fprintf(stderr, "Write-config RPMB request, error = 0x%x\n",
 			error);
@@ -746,7 +795,7 @@ static int rpmb_write_config_block(int fd, unsigned char *cfg_buf,
 	rsp->target = req->target;
 	rsp->type = RPMB_REQ_READ_RESULT;
 	/* get the response and validate */
-	error = RECV_RPMB_RSP(req->target, rsp_size, rsp);
+	error = recv_rpmb_rsp(fd, req->target, rsp_size, rsp);
 	if (error != 0) {
 		fprintf(stderr,"Failed getting write-config response\
 			error = 0x%x\n", error);
@@ -755,9 +804,9 @@ static int rpmb_write_config_block(int fd, unsigned char *cfg_buf,
 	error = check_rpmb_response(req, rsp,
 				  "Failed to retrieve write-config response");
 out:
-	if (req) free(req);
-	if (rsp) free(rsp);
-	if (mac) free(mac);
+	free(req);
+	free(rsp);
+	free(mac);
 	
 	return error;
 }
@@ -823,8 +872,9 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 	unsigned char *msg_buf = NULL;
 	unsigned int msg_size = 0;
 	unsigned int key_size = 0;
-	int fd = -1, err = -1;
 	struct nvme_id_ctrl ctrl;
+	struct nvme_dev *dev;
+	int err = -1;
 
 	union ctrl_rpmbs_reg {
 		struct {
@@ -837,11 +887,11 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 		unsigned int rpmbs;
 	} regs;
 	
-	if ((fd = parse_and_open(argc, argv, desc, opts)) < 0)
-		goto out;
+	if ((err = parse_and_open(&dev, argc, argv, desc, opts)))
+		return err;
 	
 	/* before parsing  commands, check if controller supports any RPMB targets */
-	err = nvme_identify_ctrl(fd, &ctrl);
+	err = nvme_identify_ctrl(dev_fd(dev), &ctrl);
 	if (err)
 		goto out;
 	
@@ -910,13 +960,15 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 	
 	switch (cfg.opt) {
 		case RPMB_REQ_READ_WRITE_CNTR:
-			err = rpmb_read_write_counter(fd, cfg.target, &write_cntr);
+			err = rpmb_read_write_counter(dev_fd(dev), cfg.target,
+						      &write_cntr);
 			if (err == 0)
 				printf("Write Counter is: %u\n", write_cntr);
 			break;
 	
 		case RPMB_REQ_AUTH_DCB_READ:
-			write_cntr = rpmb_read_config_block(fd, &msg_buf);
+			write_cntr = rpmb_read_config_block(dev_fd(dev),
+							    &msg_buf);
 			if (msg_buf == NULL) {
 				fprintf(stderr, "failed read config blk\n");
 				goto out;
@@ -926,11 +978,11 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 			if (cfg.msgfile == 0) {
 				struct rpmb_config_block_t *cfg =
 						(struct rpmb_config_block_t *)msg_buf;
-				printf("Boot Parition Protection is %s\n",
+				printf("Boot Partition Protection is %s\n",
 					((cfg->bp_enable & 0x1)  ? "Enabled" : "Disabled"));
-				printf("Boot Parition 1 is %s\n",
+				printf("Boot Partition 1 is %s\n",
 					((cfg->bp_lock & 0x2) ? "Locked" : "Unlocked"));
-				printf("Boot Parition 0 is %s\n",
+				printf("Boot Partition 0 is %s\n",
 					((cfg->bp_lock & 0x1) ? "Locked" : "Unlocked"));
 			} else {
 				printf("Saving received config data to %s file\n", cfg.msgfile);
@@ -948,8 +1000,9 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 					msg_size);
 				break;
 			}
-			err = rpmb_auth_data_read(fd, cfg.target, cfg.address,
-						  &msg_buf, cfg.blocks,
+			err = rpmb_auth_data_read(dev_fd(dev), cfg.target,
+						  cfg.address, &msg_buf,
+						  cfg.blocks,
 						  (regs.access_size + 1));
 			if (err > 0 && msg_buf != NULL) {
 				printf("Writting %d bytes to file %s\n",
@@ -968,7 +1021,8 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 			} else if ((cfg.blocks * 512) < msg_size) {
 				msg_size = cfg.blocks * 512;
 			}
-			err = rpmb_auth_data_write(fd, cfg.target, cfg.address,
+			err = rpmb_auth_data_write(dev_fd(dev), cfg.target,
+						   cfg.address,
 						  ((regs.access_size + 1) * 512),
 						   msg_buf, msg_size,
 						   key_buf, key_size);
@@ -979,11 +1033,13 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 			break;
 
 		case RPMB_REQ_AUTH_DCB_WRITE:
-			err = rpmb_write_config_block(fd, msg_buf, key_buf, key_size);
+			err = rpmb_write_config_block(dev_fd(dev), msg_buf,
+						      key_buf, key_size);
 			break;
 	
 		case RPMB_REQ_AUTH_KEY_PROGRAM:
-			err = rpmb_program_auth_key(fd, cfg.target, key_buf, key_size);
+			err = rpmb_program_auth_key(dev_fd(dev), cfg.target,
+						    key_buf, key_size);
 			break;
 		default:
 			break;
@@ -991,11 +1047,11 @@ int rpmb_cmd_option(int argc, char **argv, struct command *cmd, struct plugin *p
 	 
 out:
 	/* release memory  */
-	if (key_buf) free(key_buf);
-	if (msg_buf) free(msg_buf);
+	free(key_buf);
+	free(msg_buf);
 	
-	/* close file descriptor */
-	if (fd > 0) close(fd);
+	/* close device */
+	dev_close(dev);
 	
 	return err;
 }

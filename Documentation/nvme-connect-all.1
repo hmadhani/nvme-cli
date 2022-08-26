@@ -2,12 +2,12 @@
 .\"     Title: nvme-connect-all
 .\"    Author: [FIXME: author] [see http://www.docbook.org/tdg5/en/html/author]
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: 01/20/2021
+.\"      Date: 08/01/2022
 .\"    Manual: NVMe Manual
 .\"    Source: NVMe
 .\"  Language: English
 .\"
-.TH "NVME\-CONNECT\-ALL" "1" "01/20/2021" "NVMe" "NVMe Manual"
+.TH "NVME\-CONNECT\-ALL" "1" "08/01/2022" "NVMe" "NVMe Manual"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -34,12 +34,15 @@ nvme-connect-all \- Discover and Connect to Fabrics controllers\&.
 .nf
 \fInvme connect\-all\fR
                 [\-\-transport=<trtype>     | \-t <trtype>]
+                [\-\-nqn=<subnqn>           | \-n <subnqn>]
                 [\-\-traddr=<traddr>        | \-a <traddr>]
                 [\-\-trsvcid=<trsvcid>      | \-s <trsvcid>]
                 [\-\-host\-traddr=<traddr>   | \-w <traddr>]
+                [\-\-host\-iface=<iface>     | \-f <iface>]
                 [\-\-hostnqn=<hostnqn>      | \-q <hostnqn>]
                 [\-\-hostid=<hostid>        | \-I <hostid>]
                 [\-\-raw=<filename>         | \-r <filename>]
+                [\-\-cfg\-file=<cfg>         | \-C <cfg>]
                 [\-\-keep\-alive\-tmo=<#>     | \-k <#>]
                 [\-\-reconnect\-delay=<#>    | \-c <#>]
                 [\-\-ctrl\-loss\-tmo=<#>      | \-l <#>]
@@ -49,9 +52,9 @@ nvme-connect-all \- Discover and Connect to Fabrics controllers\&.
                 [\-\-nr\-write\-queues=<#>    | \-W <#>]
                 [\-\-nr\-poll\-queues=<#>     | \-P <#>]
                 [\-\-queue\-size=<#>         | \-Q <#>]
-                [\-\-matching               | \-m]
                 [\-\-persistent             | \-p]
                 [\-\-quiet                  | \-S]
+                [\-\-dump\-config            | \-O]
 .fi
 .SH "DESCRIPTION"
 .sp
@@ -59,7 +62,7 @@ Send one or more Discovery requests to a NVMe over Fabrics Discovery Controller,
 .sp
 If no parameters are given, then \fInvme connect\-all\fR will attempt to find a /etc/nvme/discovery\&.conf file to use to supply a list of connect\-all commands to run\&. If no /etc/nvme/discovery\&.conf file exists, the command will quit with an error\&.
 .sp
-Otherwise a specific Discovery Controller should be specified using the \-\-transport, \-\-traddr and if necessary the \-\-trsvcid and a Diѕcovery request will be sent to the specified Discovery Controller\&.
+Otherwise a specific Discovery Controller should be specified using the \-\-transport, \-\-traddr and if necessary the \-\-trsvcid and a Discovery request will be sent to the specified Discovery Controller\&.
 .sp
 See the documentation for the nvme\-discover(1) command for further background\&.
 .SH "OPTIONS"
@@ -104,6 +107,11 @@ T}
 .sp 1
 .RE
 .PP
+\-n <subnqn>, \-\-nqn <subnqn>
+.RS 4
+This field specifies the name for the NVMe subsystem to connect to\&.
+.RE
+.PP
 \-a <traddr>, \-\-traddr=<traddr>
 .RS 4
 This field specifies the network address of the Discovery Controller\&. For transports using IP addressing (e\&.g\&. rdma) this should be an IP\-based address (ex\&. IPv4)\&.
@@ -116,7 +124,12 @@ This field specifies the transport service id\&. For transports using IP address
 .PP
 \-w <traddr>, \-\-host\-traddr=<traddr>
 .RS 4
-This field specifies the network address used on the host to connect to the Discovery Controller\&.
+This field specifies the network address used on the host to connect to the Controller\&. For TCP, this sets the source address on the socket\&.
+.RE
+.PP
+\-f <iface>, \-\-host\-iface=<iface>
+.RS 4
+This field specifies the network interface used on the host to connect to the Controller (e\&.g\&. IP eth1, enp2s0, enx78e7d1ea46da)\&. This forces the connection to be made on a specific interface instead of letting the system decide\&.
 .RE
 .PP
 \-q <hostnqn>, \-\-hostnqn=<hostnqn>
@@ -136,6 +149,14 @@ This field will take the output of the
 command and dump it to a raw binary file\&. By default
 \fInvme connect\-all\fR
 will dump the output to stdout\&.
+.RE
+.PP
+\-C <cfg>, \-\-config\-file=<cfg>
+.RS 4
+Use the specified JSON configuration file instead of the default /etc/nvme/config\&.json file or
+\fInone\fR
+to not read in an existing configuration file\&. The JSON configuration file format is documented in
+\m[blue]\fBhttps://github\&.com/linux\-nvme/libnvme/doc/config\-schema\&.json\fR\m[]
 .RE
 .PP
 \-k <#>, \-\-keep\-alive\-tmo=<#>
@@ -183,11 +204,6 @@ Adds additional queues that will be used for polling latency sensitive I/O\&.
 Overrides the default number of elements in the I/O queues created by the driver\&. This option will be ignored for discovery, but will be passed on to the subsequent connect call\&.
 .RE
 .PP
-\-m, \-\-matching
-.RS 4
-If a traddr was specified on the command line or in the configuration file, only create controllers for discovery records that match the given traddr, rather than for all entries in the discovery log page\&.
-.RE
-.PP
 \-p, \-\-persistent
 .RS 4
 Don\(cqt remove the discovery controller after retrieving the discovery log page\&.
@@ -196,6 +212,11 @@ Don\(cqt remove the discovery controller after retrieving the discovery log page
 \-S, \-\-quiet
 .RS 4
 Suppress error messages\&.
+.RE
+.PP
+\-O, \-\-dump\-config
+.RS 4
+Print out resulting JSON configuration file to stdout\&.
 .RE
 .SH "EXAMPLES"
 .sp

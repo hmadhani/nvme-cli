@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2014 PMC-Sierra, Inc.
  *
@@ -39,6 +40,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdbool.h>
 
 static argconfig_help_func *help_funcs[MAX_HELP_FUNC] = { NULL };
 
@@ -134,7 +136,7 @@ void argconfig_print_help(const char *program_desc,
 		return;
 
 	printf("\n\033[1mOptions:\033[0m\n");
-	for (s = options; (s->option != NULL) && (s != NULL); s++)
+	for (s = options; (s != NULL) && (s->option != NULL); s++)
 		show_option(s);
 }
 
@@ -176,17 +178,8 @@ int argconfig_parse(int argc, char *argv[], const char *program_desc,
 		if (s->option && strlen(s->option)) {
 			long_opts[option_index].name = s->option;
 			long_opts[option_index].has_arg = s->argument_type;
-
-			if (s->argument_type == no_argument
-			    && s->default_value != NULL) {
-				value_addr = (void *)(char *)s->default_value;
-
-				long_opts[option_index].flag = value_addr;
-				long_opts[option_index].val = 1;
-			} else {
-				long_opts[option_index].flag = NULL;
-				long_opts[option_index].val = 0;
-			}
+			long_opts[option_index].flag = NULL;
+			long_opts[option_index].val = 0;
 		}
 		option_index++;
 	}
@@ -219,10 +212,6 @@ int argconfig_parse(int argc, char *argv[], const char *program_desc,
 			}
 			if (option_index == options_count)
 				continue;
-			if (long_opts[option_index].flag) {
-				*(uint8_t *)(long_opts[option_index].flag) = 1;
-				continue;
-			}
 		}
 
 		s = &options[option_index];
@@ -282,7 +271,7 @@ int argconfig_parse(int argc, char *argv[], const char *program_desc,
 			}
 			*((uint32_t *) value_addr) = tmp;
 		} else if (s->config_type == CFG_INCREMENT) {
-			(*((int *)value_addr))++;
+			*((int *)value_addr) += 1;
 		} else if (s->config_type == CFG_LONG) {
 			*((unsigned long *)value_addr) = strtoul(optarg, &endptr, 0);
 			if (errno || optarg == endptr) {
@@ -363,6 +352,8 @@ int argconfig_parse(int argc, char *argv[], const char *program_desc,
 				goto out;
 			}
 			*((FILE **) value_addr) = f;
+		} else if (s->config_type == CFG_FLAG) {
+			*((bool *)value_addr) = true;
 		}
 	}
 	free(short_opts);
@@ -497,6 +488,51 @@ int argconfig_parse_comma_sep_array(char *string, int *val,
 	}
 }
 
+int argconfig_parse_comma_sep_array_short(char *string, unsigned short *val,
+					  unsigned max_length)
+{
+	int ret = 0;
+	unsigned long v;
+	char *tmp;
+	char *p;
+
+	if (!string || !strlen(string))
+		return 0;
+
+	tmp = strtok(string, ",");
+	if (!tmp)
+		return 0;
+
+	v = strtoul(tmp, &p, 0);
+	if (*p != 0)
+		return -1;
+	if (v > UINT16_MAX) {
+		fprintf(stderr, "%s out of range\n", tmp);
+		return -1;
+	}
+	val[ret] = v;
+	ret++;
+
+	while (1) {
+		tmp = strtok(NULL, ",");
+		if (tmp == NULL)
+			return ret;
+
+		if (ret >= max_length)
+			return -1;
+
+		v = strtoul(tmp, &p, 0);
+		if (*p != 0)
+			return -1;
+		if (v > UINT16_MAX) {
+			fprintf(stderr, "%s out of range\n", tmp);
+			return -1;
+		}
+		val[ret] = v;
+		ret++;
+	}
+}
+
 int argconfig_parse_comma_sep_array_long(char *string,
 					      unsigned long long *val,
 					      unsigned max_length)
@@ -538,7 +574,8 @@ void argconfig_register_help_func(argconfig_help_func * f)
 	for (i = 0; i < MAX_HELP_FUNC; i++) {
 		if (help_funcs[i] == NULL) {
 			help_funcs[i] = f;
-			help_funcs[i + 1] = NULL;
+			if (i < MAX_HELP_FUNC - 1)
+				help_funcs[i + 1] = NULL;
 			break;
 		}
 	}
